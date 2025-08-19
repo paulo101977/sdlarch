@@ -10,3 +10,8 @@ CMakeFiles/
 Slot 1/
 User/
 cmake_install.cmake
+*.dll
+*.exp
+*.ilk
+*.lib
+*.pdb

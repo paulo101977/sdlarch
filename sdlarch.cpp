@@ -8,6 +8,12 @@
 #include <cstring>
 #include <iostream>
 
+#ifdef _WIN32
+#define EXPORT __declspec(dllexport)
+#else
+#define EXPORT
+#endif
+
 using namespace std;
 
 #ifdef __cplusplus
@@ -1047,19 +1053,19 @@ static void core_unload() {
 
 static void noop() {}
 
-void get_frame(uint8_t* buffer, int width, int height) {
+EXPORT void get_frame(uint8_t* buffer, int width, int height) {
     SDL_GL_MakeCurrent(g_win, g_ctx);
     
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, buffer);
 }
 
-void run() {
+EXPORT void run() {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     g_retro.retro_run();
 }
 
-void init(char *core, char *game) {
+EXPORT void init(char *core, char *game) {
     if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO|SDL_INIT_EVENTS) < 0)
         die("Failed to initialize SDL");
 
