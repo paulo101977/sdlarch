@@ -1,4 +1,8 @@
-# sdlarch
+# sdlarch-rl
+
+This is a fork of sdlarch that aims to develop RL projects.
+
+## sdlarch
 
 sdlarch is a small libretro frontend (sdlarch.c has less than 1000 lines of
 code) created for educational purposes. It only provides the required (video,
@@ -7,10 +11,32 @@ or configuration support.
 
 ## Building
 
-Other than `make`, `pkg-config` and a working C99 or C++ compiler, you'll need
-`sdl2` development files installed.
+- Linux:
 
-## Running
+```shell
+cmake .
+make
+```
 
-    ./sdlarch <core> <uncompressed content>
+- Windows:
 
+```shell
+cmake .
+nmake
+```
+
+## TODO
+
+- [x] Run PCSX2 Core
+- [ ] Load PCSX2 States
+- [ ] Gymnasium compatibility
+- [ ] Load Emulator memory
+- [ ] Load games in the same standard as stable-retro
+- [ ] Improve performance
+- [ ] Load another cores (Dolphin, etc)
+
+## Our Youtube Channel
+
+If you are interested in our AI projects, visit our channel:
+
+[AI Brain](https://www.youtube.com/@AiBrainAi?sub_confirmation=1)
