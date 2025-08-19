@@ -1,3 +1,12 @@
 *.o
 build/
 /sdlarch
+pcsx2/
+*.so
+.ipynb_checkpoints/
+.vscode/
+CMakeCache.txt
+CMakeFiles/
+Slot 1/
+User/
+cmake_install.cmake

@@ -2,9 +2,20 @@
 #include <SDL.h>
 #include "libretro.h"
 #include "glad.h"
+#include <map>
+#include <string>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+
+using namespace std;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 static SDL_Window *g_win = NULL;
-static SDL_GLContext *g_ctx = NULL;
+static SDL_GLContext g_ctx = NULL;
 static SDL_AudioDeviceID g_pcm = 0;
 static struct retro_frame_time_callback runloop_frame_time;
 static retro_usec_t runloop_frame_time_last = 0;
@@ -67,7 +78,43 @@ static const char *g_fshader_src =
         "gl_FragColor = texture2D(u_tex, o_coord);\n"
     "}";
 
-
+static map<string, const char*> s_envVariables = {
+	{ "pcsx2_enable_hw_hacks", "disabled" },
+	// { "pcsx2_renderer", "paraLLEl-GS" },
+	// { "pcsx2_software_clut_render", "Normal" },
+	// { "pcsx2_bios", "scph39001.bin" },
+	// { "pcsx2_fastboot", "enabled" },
+	// { "pcsx2_fastcdvd", "disabled" },
+	// { "pcsx2_pgs_ssaa", "Native" },
+	// { "pcsx2_pgs_ss_tex", "disabled" },
+	// { "pcsx2_pgs_deblur", "disabled" },
+	// { "pcsx2_pgs_high_res_scanout", "disabled" },
+	// { "pcsx2_pgs_disable_mipmaps", "disabled" },
+	// { "pcsx2_nointerlacing_hint", "disabled" },
+	// { "pcsx2_pcrtc_antiblur", "disabled" },
+	// { "pcsx2_pcrtc_screen_offsets", "disabled" },
+	// { "pcsx2_disable_interlace_offset", "disabled" },
+	// { "pcsx2_deinterlace_mode", "Automatic" },
+	// { "pcsx2_enable_cheats", "disabled" },
+	// { "pcsx2_hint_language_unlock", "disabled" },
+	// { "pcsx2_ee_cycle_rate", "100% (Normal Speed)" },
+	// { "pcsx2_widescreen_hint", "disabled" },
+	// { "pcsx2_uncapped_framerate_hint", "disabled" },
+	// { "pcsx2_game_enhancements_hint", "disabled" },
+	// { "pcsx2_ee_cycle_skip", "disabled" },
+	// { "pcsx2_axis_scale1", "133%" },
+	// { "pcsx2_axis_deadzone1", "15%" },
+	// { "pcsx2_button_deadzone1", "0%" },
+	// { "pcsx2_enable_rumble1", "100%" },
+	// { "pcsx2_invert_left_stick1", "disabled" },
+	// { "pcsx2_invert_right_stick1", "disabled" },
+	// { "pcsx2_axis_scale2", "133%" },
+	// { "pcsx2_axis_deadzone2", "15%" },
+	// { "pcsx2_button_deadzone2", "0%" },
+	// { "pcsx2_enable_rumble2", "100%" },
+	// { "pcsx2_invert_left_stick2", "disabled" },
+	// { "pcsx2_invert_right_stick2", "disabled" },
+};
 
 
 static struct {
@@ -298,6 +345,8 @@ static void resize_cb(int w, int h) {
 
 
 static void create_window(int width, int height) {
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
     SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
@@ -324,7 +373,14 @@ static void create_window(int width, int height) {
         die("Unsupported hw context %i. (only OPENGL, OPENGL_CORE and OPENGLES2 supported)", g_video.hw.context_type);
     }
 
-    g_win = SDL_CreateWindow("sdlarch", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, SDL_WINDOW_OPENGL);
+    g_win = SDL_CreateWindow(
+        "sdlarch", 
+        SDL_WINDOWPOS_CENTERED,
+        SDL_WINDOWPOS_CENTERED,
+        width, 
+        height, 
+        SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN
+    );
 
 	if (!g_win)
         die("Failed to create window: %s", SDL_GetError());
@@ -350,7 +406,7 @@ static void create_window(int width, int height) {
 
     init_shaders();
 
-    SDL_GL_SetSwapInterval(1);
+    SDL_GL_SetSwapInterval(0); // disable vsync
     SDL_GL_SwapWindow(g_win); // make apitrace output nicer
 
     resize_cb(width, height);
@@ -376,8 +432,8 @@ static void video_configure(const struct retro_game_geometry *geom) {
 
 	resize_to_aspect(geom->aspect_ratio, geom->base_width * 1, geom->base_height * 1, &nwidth, &nheight);
 
-	nwidth *= g_scale;
-	nheight *= g_scale;
+	// nwidth *= g_scale;
+	// nheight *= g_scale;
 
 	if (!g_win)
 		create_window(nwidth, nheight);
@@ -451,7 +507,7 @@ static bool video_set_pixel_format(unsigned format) {
 
 
 static void video_refresh(const void *data, unsigned width, unsigned height, unsigned pitch) {
-    if (g_video.clip_w != width || g_video.clip_h != height)
+    if ((g_video.clip_w != width || g_video.clip_h != height) && (width != 0 && height != 0)) 
     {
 		g_video.clip_h = height;
 		g_video.clip_w = width;
@@ -470,6 +526,9 @@ static void video_refresh(const void *data, unsigned width, unsigned height, uns
 		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
 						g_video.pixtype, g_video.pixfmt, data);
 	}
+
+    // geom -> base_width = width;
+    // geom -> base_height = height;
 
     int w = 0, h = 0;
     SDL_GetWindowSize(g_win, &w, &h);
@@ -701,7 +760,7 @@ static bool core_environment(unsigned cmd, void *data) {
                 semicolon++;
 
             if (first_pipe) {
-                outvar->value = malloc((first_pipe - semicolon) + 1);
+                outvar->value = (const char*)malloc((first_pipe - semicolon) + 1);
                 memcpy((char*)outvar->value, semicolon, first_pipe - semicolon);
                 ((char*)outvar->value)[first_pipe - semicolon] = '\0';
             } else {
@@ -709,11 +768,26 @@ static bool core_environment(unsigned cmd, void *data) {
             }
 
             outvar->key = strdup(invar->key);
+
+            if(!strcmp(outvar->key, "dolphin_renderer")) {
+                free((void*)outvar->value);
+                outvar->value = strdup("Software");
+            }
+
+            if(!strcmp(outvar->key, "pcsx2_renderer")) {
+                free((void*)outvar->value);
+                outvar->value = strdup("Software");
+            }
+
+            printf("Variable: %s = %s\n", outvar->key, outvar->value);
+
             SDL_assert(outvar->key && outvar->value);
         }
 
         return true;
     }
+
+
     case RETRO_ENVIRONMENT_GET_VARIABLE: {
         struct retro_variable *var = (struct retro_variable *)data;
 
@@ -729,6 +803,7 @@ static bool core_environment(unsigned cmd, void *data) {
 
         return true;
     }
+
     case RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE: {
         bool *bval = (bool*)data;
 		*bval = false;
@@ -740,21 +815,21 @@ static bool core_environment(unsigned cmd, void *data) {
         return true;
 	}
     case RETRO_ENVIRONMENT_GET_PERF_INTERFACE: {
-        struct retro_perf_callback *perf = (struct retro_perf_callback *)data;
-        perf->get_time_usec = cpu_features_get_time_usec;
-        perf->get_cpu_features = core_get_cpu_features;
-        perf->get_perf_counter = core_get_perf_counter;
-        perf->perf_register = core_perf_register;
-        perf->perf_start = core_perf_start;
-        perf->perf_stop = core_perf_stop;
-        perf->perf_log = core_perf_log;
+        // struct retro_perf_callback *perf = (struct retro_perf_callback *)data;
+        // perf->get_time_usec = cpu_features_get_time_usec;
+        // perf->get_cpu_features = core_get_cpu_features;
+        // perf->get_perf_counter = core_get_perf_counter;
+        // perf->perf_register = core_perf_register;
+        // perf->perf_start = core_perf_start;
+        // perf->perf_stop = core_perf_stop;
+        // perf->perf_log = core_perf_log;
         return true;
     }
-	case RETRO_ENVIRONMENT_GET_CAN_DUPE: {
-		bool *bval = (bool*)data;
-		*bval = true;
-        return true;
-    }
+	// case RETRO_ENVIRONMENT_GET_CAN_DUPE: {
+	// 	bool *bval = (bool*)data;
+	// 	*bval = true;
+    //     return true;
+    // }
 	case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: {
 		const enum retro_pixel_format *fmt = (enum retro_pixel_format *)data;
 
@@ -771,9 +846,9 @@ static bool core_environment(unsigned cmd, void *data) {
         return true;
     }
     case RETRO_ENVIRONMENT_SET_FRAME_TIME_CALLBACK: {
-        const struct retro_frame_time_callback *frame_time =
-            (const struct retro_frame_time_callback*)data;
-        runloop_frame_time = *frame_time;
+        // const struct retro_frame_time_callback *frame_time =
+        //     (const struct retro_frame_time_callback*)data;
+        // runloop_frame_time = *frame_time;
         return true;
     }
     case RETRO_ENVIRONMENT_SET_AUDIO_CALLBACK: {
@@ -792,6 +867,8 @@ static bool core_environment(unsigned cmd, void *data) {
         g_video.clip_w = geom->base_width;
         g_video.clip_h = geom->base_height;
 
+        printf("Set geometry: ----->>>> %u %u %u %u\n", geom->base_width, geom->base_height, geom->max_width, geom->max_height);
+
         // some cores call this before we even have a window
         if (g_win) {
             refresh_vertex_data();
@@ -799,15 +876,15 @@ static bool core_environment(unsigned cmd, void *data) {
             int ow = 0, oh = 0;
             resize_to_aspect(geom->aspect_ratio, geom->base_width, geom->base_height, &ow, &oh);
 
-            ow *= g_scale;
-            oh *= g_scale;
+            // ow *= g_scale;
+            // oh *= g_scale;
 
             SDL_SetWindowSize(g_win, ow, oh);
         }
         return true;
     }
     case RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME: {
-        g_retro.supports_no_game = *(bool*)data;
+        // g_retro.supports_no_game = *(bool*)data;
         return true;
     }
     case RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE: {
@@ -949,7 +1026,7 @@ static void core_load_game(const char *filename) {
 	g_retro.retro_get_system_av_info(&av);
 
 	video_configure(&av.geometry);
-	audio_init(av.timing.sample_rate);
+	// audio_init(av.timing.sample_rate);
 
     if (info.data)
         SDL_free((void*)info.data);
@@ -970,10 +1047,19 @@ static void core_unload() {
 
 static void noop() {}
 
-int main(int argc, char *argv[]) {
-	if (argc < 2)
-		die("usage: %s <core> [game]", argv[0]);
+void get_frame(uint8_t* buffer, int width, int height) {
+    SDL_GL_MakeCurrent(g_win, g_ctx);
+    
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, buffer);
+}
 
+void run() {
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    g_retro.retro_run();
+}
+
+void init(char *core, char *game) {
     if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO|SDL_INIT_EVENTS) < 0)
         die("Failed to initialize SDL");
 
@@ -984,66 +1070,66 @@ int main(int argc, char *argv[]) {
     g_video.hw.context_destroy = noop;
 
     // Load the core.
-    core_load(argv[1]);
-
-    if (!g_retro.supports_no_game && argc < 3)
-        die("This core requires a game in order to run");
+    core_load(core);
 
     // Load the game.
-    core_load_game(argc > 2 ? argv[2] : NULL);
+    core_load_game(game);
 
     // Configure the player input devices.
-    g_retro.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
+    // g_retro.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
+    g_retro.retro_set_controller_port_device(0, RETRO_DEVICE_KEYBOARD);
 
     SDL_Event ev;
 
-    while (running) {
-        // Update the game loop timer.
-        if (runloop_frame_time.callback) {
-            retro_time_t current = cpu_features_get_time_usec();
-            retro_time_t delta = current - runloop_frame_time_last;
+    // while (running) {
+    //     // Update the game loop timer.
+    //     if (runloop_frame_time.callback) {
+    //         retro_time_t current = cpu_features_get_time_usec();
+    //         retro_time_t delta = current - runloop_frame_time_last;
 
-            if (!runloop_frame_time_last)
-                delta = runloop_frame_time.reference;
-            runloop_frame_time_last = current;
-            runloop_frame_time.callback(delta);
-        }
+    //         if (!runloop_frame_time_last)
+    //             delta = runloop_frame_time.reference;
+    //         runloop_frame_time_last = current;
+    //         runloop_frame_time.callback(delta);
+    //     }
 
-        // Ask the core to emit the audio.
-        if (audio_callback.callback) {
-            audio_callback.callback();
-        }
+    //     // Ask the core to emit the audio.
+    //     if (audio_callback.callback) {
+    //         audio_callback.callback();
+    //     }
 
-        while (SDL_PollEvent(&ev)) {
-            switch (ev.type) {
-            case SDL_QUIT: running = false; break;
-            case SDL_WINDOWEVENT:
-                switch (ev.window.event) {
-                case SDL_WINDOWEVENT_CLOSE: running = false; break;
-                case SDL_WINDOWEVENT_RESIZED:
-                    resize_cb(ev.window.data1, ev.window.data2);
-                    break;
-                }
-            }
-        }
+    //     while (SDL_PollEvent(&ev)) {
+    //         switch (ev.type) {
+    //         case SDL_QUIT: running = false; break;
+    //         case SDL_WINDOWEVENT:
+    //             switch (ev.window.event) {
+    //             case SDL_WINDOWEVENT_CLOSE: running = false; break;
+    //             case SDL_WINDOWEVENT_RESIZED:
+    //                 resize_cb(ev.window.data1, ev.window.data2);
+    //                 break;
+    //             }
+    //         }
+    //     }
 
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-		g_retro.retro_run();
-	}
+    //     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	// 	g_retro.retro_run();
+	// }
 
-	core_unload();
-	audio_deinit();
-	video_deinit();
+	// core_unload();
+	// audio_deinit();
+	// video_deinit();
 
-    if (g_vars) {
-        for (const struct retro_variable *v = g_vars; v->key; ++v) {
-            free((char*)v->key);
-            free((char*)v->value);
-        }
-        free(g_vars);
-    }
+    // if (g_vars) {
+    //     for (const struct retro_variable *v = g_vars; v->key; ++v) {
+    //         free((char*)v->key);
+    //         free((char*)v->value);
+    //     }
+    //     free(g_vars);
+    // }
 
-    SDL_Quit();
-
-    return EXIT_SUCCESS;
+    // SDL_Quit();
 }
+
+#ifdef __cplusplus
+}
+#endif
