@@ -895,17 +895,17 @@ static bool core_environment(unsigned cmd, void *data) {
         g_video.hw = *hw;
         return true;
     }
-    case RETRO_ENVIRONMENT_SET_FRAME_TIME_CALLBACK: {
-        // const struct retro_frame_time_callback *frame_time =
-        //     (const struct retro_frame_time_callback*)data;
-        // runloop_frame_time = *frame_time;
-        return true;
-    }
-    case RETRO_ENVIRONMENT_SET_AUDIO_CALLBACK: {
-        struct retro_audio_callback *audio_cb = (struct retro_audio_callback*)data;
-        audio_callback = *audio_cb;
-        return true;
-    }
+    // case RETRO_ENVIRONMENT_SET_FRAME_TIME_CALLBACK: {
+    //     // const struct retro_frame_time_callback *frame_time =
+    //     //     (const struct retro_frame_time_callback*)data;
+    //     // runloop_frame_time = *frame_time;
+    //     return true;
+    // }
+    // case RETRO_ENVIRONMENT_SET_AUDIO_CALLBACK: {
+    //     struct retro_audio_callback *audio_cb = (struct retro_audio_callback*)data;
+    //     audio_callback = *audio_cb;
+    //     return true;
+    // }
     case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY:
     case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY: {
         const char **dir = (const char**)data;
@@ -957,6 +957,14 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
 
 
 static void core_input_poll(void) {
+	// int i;
+    // g_kbd = SDL_GetKeyboardState(NULL);
+
+	// for (i = 0; g_binds[i].k || g_binds[i].rk; ++i)
+    //     g_joy[g_binds[i].rk] = g_kbd[g_binds[i].k];
+
+    // if (g_kbd[SDL_SCANCODE_ESCAPE])
+    //     running = false;
 }
 
 
@@ -964,22 +972,28 @@ static int16_t core_input_state(unsigned port, unsigned device, unsigned index, 
 
     if (port >= MAX_PLAYERS) return 0;
     
-    if ((device == RETRO_DEVICE_JOYPAD || device == RETRO_DEVICE_ANALOG) && index == 0) {
-        if (id < N_BUTTONS) {
-            printf("Input state: port %u, device %u, index %u, id %u\n", port, device, index, id);
-
-            printf("Input value: %u\n\n", m_buttonMask[port][id]);
-
-            return m_buttonMask[port][id] ? 1 : 0;
+    // convert to button mask (PCSX2 style)
+    if (device == RETRO_DEVICE_JOYPAD && id == RETRO_DEVICE_ID_JOYPAD_MASK) {
+        uint32_t mask = 0;
+        for (int i = 0; i < N_BUTTONS; i++) {
+            if (m_buttonMask[port][i]) {
+                mask |= (1 << i);
+            }
         }
+        return mask;
     }
     
-    if (device == RETRO_DEVICE_ANALOG && index != 0) {
+
+    if (device == RETRO_DEVICE_JOYPAD && id < N_BUTTONS) {
+        return m_buttonMask[port][id] ? 1 : 0;
+    }
+    
+
+    if (device == RETRO_DEVICE_ANALOG) {
         return 0;
     }
-
-
-	return 0;
+    
+    return 0;
 }
 
 
@@ -1138,8 +1152,8 @@ void reset() {
 
 	g_retro.retro_reset();
 
-    // g_retro.retro_set_controller_port_device(0, RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 1));
-    // g_retro.retro_set_controller_port_device(1, RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 1));
+    g_retro.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
+    g_retro.retro_set_controller_port_device(1, RETRO_DEVICE_JOYPAD);
 }
 
 void setKey(int port, int key, bool active) { 
@@ -1164,7 +1178,8 @@ void init(char *core, char *game) {
 
     // Configure the player input devices.
     // g_retro.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
-    g_retro.retro_set_controller_port_device(0, RETRO_DEVICE_KEYBOARD);
+    g_retro.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
+    g_retro.retro_set_controller_port_device(1, RETRO_DEVICE_JOYPAD);
 
     // SDL_Event ev;
 

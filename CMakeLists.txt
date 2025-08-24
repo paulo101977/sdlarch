@@ -12,6 +12,11 @@ add_subdirectory("third-party/pybind11")
 find_package(Python3 COMPONENTS Development REQUIRED)
 # find_package(pybind11 REQUIRED)
 
+if(UNIX AND NOT APPLE AND NOT PYTHON3_EXTENSION_SUFFIX)
+    set(PYTHON3_EXTENSION_SUFFIX ".so")
+    message(STATUS "Setting manual Python extension suffix: ${PYTHON3_EXTENSION_SUFFIX}")
+endif()
+
 message(STATUS "Python include dirs: ${Python3_INCLUDE_DIRS}")
 message(STATUS "Python library: ${Python3_LIBRARIES}")
 message(STATUS "pybind11 found: ${pybind11_FOUND}")
