@@ -1,9 +1,20 @@
 cmake_minimum_required(VERSION 3.12)
 project(pcsx2_headless LANGUAGES C CXX)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+add_definitions(-DGLAD_GLAPI_EXPORT)
+add_definitions(-DGLAD_GLAPI_EXPORT_BUILD)
+
+add_subdirectory("third-party/pybind11")
+
+find_package(Python3 COMPONENTS Development REQUIRED)
+# find_package(pybind11 REQUIRED)
+
+message(STATUS "Python include dirs: ${Python3_INCLUDE_DIRS}")
+message(STATUS "Python library: ${Python3_LIBRARIES}")
+message(STATUS "pybind11 found: ${pybind11_FOUND}")
 
 if(WIN32)
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
@@ -43,21 +54,54 @@ else()
     set(SDL2_FOUND TRUE)
 endif()
 
-add_library(pcsx2_headless SHARED
-    sdlarch.cpp
-    glad.c
+add_library(glad STATIC glad.c)
+set_target_properties(glad PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
 )
 
+add_library(pcsx2_headless SHARED
+    sdlarch.cpp
+)
+
+pybind11_add_module(_retro
+    "sdlarch.cpp"
+    "glad.c"
+)
 
 target_include_directories(pcsx2_headless PRIVATE
     ${SDL2_INCLUDE_DIR}
+    ${Python3_INCLUDE_DIRS}
+    ${pybind11_INCLUDE_DIRS}
+    .
+)
+
+
+
+target_include_directories(_retro PRIVATE
+    ${SDL2_INCLUDE_DIR}
+    ${Python3_INCLUDE_DIRS}
+    ${pybind11_INCLUDE_DIRS}
+    .
+)
+
+target_include_directories(glad PRIVATE
     .
 )
 
 if(WIN32)
     target_link_libraries(pcsx2_headless PRIVATE
+        glad  
         ${SDL2_LIBRARY}
         opengl32.lib
+        ${Python3_LIBRARIES}
+    )
+    
+    target_link_libraries(_retro PRIVATE
+        pcsx2_headless
+        ${SDL2_LIBRARY}
+        opengl32.lib
+        ${Python3_LIBRARIES}
+        pybind11::module
     )
     
     set_target_properties(pcsx2_headless PROPERTIES
@@ -65,24 +109,41 @@ if(WIN32)
         SUFFIX ".dll"
     )
     
-    add_custom_command(TARGET pcsx2_headless POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${SDL2_LIBRARY_DIR}/../bin/SDL2.dll"
-            $<TARGET_FILE_DIR:pcsx2_headless>
-        COMMENT "Copying SDL2.dll to output directory"
+    set_target_properties(_retro PROPERTIES
+        OUTPUT_NAME "_retro"
+        SUFFIX ".pyd"
+        PREFIX ""
     )
     
 else()
+    # Linux/WSL
     target_link_libraries(pcsx2_headless PRIVATE
         SDL2::SDL2
         OpenGL::GL
         dl
         pthread
+        ${Python3_LIBRARIES}
+    )
+    
+    target_link_libraries(_retro PRIVATE
+        pcsx2_headless
+        SDL2::SDL2
+        OpenGL::GL
+        dl
+        pthread
+        ${Python3_LIBRARIES}
+        pybind11::module
     )
     
     set_target_properties(pcsx2_headless PROPERTIES
         PREFIX ""
         SUFFIX ".so"
+    )
+    
+    set_target_properties(_retro PROPERTIES
+        OUTPUT_NAME "_retro"
+        SUFFIX "${PYTHON3_EXTENSION_SUFFIX}"
+        PREFIX ""
     )
 endif()
 
@@ -95,3 +156,15 @@ message(STATUS "Platform: ${CMAKE_SYSTEM_NAME}")
 message(STATUS "Building for: ${CMAKE_SYSTEM}")
 message(STATUS "SDL2 include: ${SDL2_INCLUDE_DIR}")
 message(STATUS "SDL2 library: ${SDL2_LIBRARY}")
+message(STATUS "Python version: ${Python3_VERSION}")
+message(STATUS "Python extension suffix: ${PYTHON3_EXTENSION_SUFFIX}")
+
+# install(TARGETS pcsx2_headless
+#     RUNTIME DESTINATION bin
+#     LIBRARY DESTINATION lib
+#     ARCHIVE DESTINATION lib
+# )
+
+# install(TARGETS _retro
+#     LIBRARY DESTINATION lib
+# )

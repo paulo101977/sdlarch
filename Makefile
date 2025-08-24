@@ -106,6 +106,19 @@ depend:
 .PHONY : depend
 
 #=============================================================================
+# Target rules for targets named glad
+
+# Build rule for target.
+glad: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\Makefile2 /nologo -$(MAKEFLAGS) glad
+.PHONY : glad
+
+# fast build rule for target.
+glad\fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\glad.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\glad.dir\build
+.PHONY : glad\fast
+
+#=============================================================================
 # Target rules for targets named pcsx2_headless
 
 # Build rule for target.
@@ -118,12 +131,26 @@ pcsx2_headless\fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\pcsx2_headless.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\pcsx2_headless.dir\build
 .PHONY : pcsx2_headless\fast
 
+#=============================================================================
+# Target rules for targets named _retro
+
+# Build rule for target.
+_retro: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\Makefile2 /nologo -$(MAKEFLAGS) _retro
+.PHONY : _retro
+
+# fast build rule for target.
+_retro\fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\_retro.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\_retro.dir\build
+.PHONY : _retro\fast
+
 glad.obj: glad.c.obj
 .PHONY : glad.obj
 
 # target to build an object file
 glad.c.obj:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\pcsx2_headless.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\pcsx2_headless.dir\glad.c.obj
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\glad.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\glad.dir\glad.c.obj
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\_retro.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\_retro.dir\glad.c.obj
 .PHONY : glad.c.obj
 
 glad.i: glad.c.i
@@ -131,7 +158,8 @@ glad.i: glad.c.i
 
 # target to preprocess a source file
 glad.c.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\pcsx2_headless.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\pcsx2_headless.dir\glad.c.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\glad.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\glad.dir\glad.c.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\_retro.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\_retro.dir\glad.c.i
 .PHONY : glad.c.i
 
 glad.s: glad.c.s
@@ -139,7 +167,8 @@ glad.s: glad.c.s
 
 # target to generate assembly for a file
 glad.c.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\pcsx2_headless.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\pcsx2_headless.dir\glad.c.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\glad.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\glad.dir\glad.c.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\_retro.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\_retro.dir\glad.c.s
 .PHONY : glad.c.s
 
 sdlarch.obj: sdlarch.cpp.obj
@@ -148,6 +177,7 @@ sdlarch.obj: sdlarch.cpp.obj
 # target to build an object file
 sdlarch.cpp.obj:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\pcsx2_headless.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\pcsx2_headless.dir\sdlarch.cpp.obj
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\_retro.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\_retro.dir\sdlarch.cpp.obj
 .PHONY : sdlarch.cpp.obj
 
 sdlarch.i: sdlarch.cpp.i
@@ -156,6 +186,7 @@ sdlarch.i: sdlarch.cpp.i
 # target to preprocess a source file
 sdlarch.cpp.i:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\pcsx2_headless.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\pcsx2_headless.dir\sdlarch.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\_retro.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\_retro.dir\sdlarch.cpp.i
 .PHONY : sdlarch.cpp.i
 
 sdlarch.s: sdlarch.cpp.s
@@ -164,6 +195,7 @@ sdlarch.s: sdlarch.cpp.s
 # target to generate assembly for a file
 sdlarch.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\pcsx2_headless.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\pcsx2_headless.dir\sdlarch.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\_retro.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\_retro.dir\sdlarch.cpp.s
 .PHONY : sdlarch.cpp.s
 
 # Help Target
@@ -174,6 +206,8 @@ help:
 	@echo ... depend
 	@echo ... edit_cache
 	@echo ... rebuild_cache
+	@echo ... _retro
+	@echo ... glad
 	@echo ... pcsx2_headless
 	@echo ... glad.obj
 	@echo ... glad.i

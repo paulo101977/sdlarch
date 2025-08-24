@@ -7,6 +7,16 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <vector>
+#include <cstdint>
+#include <cstdio>
+#include <filesystem>
+#include <pybind11/pybind11.h>
+#include <pybind11/numpy.h>
+
+#ifdef _WIN32
+#define _CRT_SECURE_NO_WARNINGS
+#endif
 
 #ifdef _WIN32
 #define EXPORT __declspec(dllexport)
@@ -15,6 +25,8 @@
 #endif
 
 using namespace std;
+
+namespace py = pybind11;
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,6 +42,10 @@ static struct retro_audio_callback audio_callback;
 
 static float g_scale = 3;
 bool running = true;
+
+const int N_BUTTONS = 16;
+const int MAX_PLAYERS = 2;
+static bool m_buttonMask[MAX_PLAYERS][N_BUTTONS]{};
 
 static struct {
 	GLuint tex_id;
@@ -86,7 +102,7 @@ static const char *g_fshader_src =
 
 static map<string, const char*> s_envVariables = {
 	{ "pcsx2_enable_hw_hacks", "disabled" },
-	// { "pcsx2_renderer", "paraLLEl-GS" },
+	{ "pcsx2_renderer", "Software" },
 	// { "pcsx2_software_clut_render", "Normal" },
 	// { "pcsx2_bios", "scph39001.bin" },
 	// { "pcsx2_fastboot", "enabled" },
@@ -138,9 +154,9 @@ static struct {
 	void (*retro_set_controller_port_device)(unsigned port, unsigned device);
 	void (*retro_reset)(void);
 	void (*retro_run)(void);
-//	size_t retro_serialize_size(void);
-//	bool retro_serialize(void *data, size_t size);
-//	bool retro_unserialize(const void *data, size_t size);
+    size_t (*retro_serialize_size)(void);
+    bool (*retro_serialize)(void *data, size_t size);
+    bool (*retro_unserialize)(const void *data, size_t size);
 //	void retro_cheat_reset(void);
 //	void retro_cheat_set(unsigned index, bool enabled, const char *code);
 	bool (*retro_load_game)(const struct retro_game_info *game);
@@ -375,6 +391,7 @@ static void create_window(int width, int height) {
         if (g_video.hw.version_major >= 3)
             SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
         break;
+    
     default:
         die("Unsupported hw context %i. (only OPENGL, OPENGL_CORE and OPENGLES2 supported)", g_video.hw.context_type);
     }
@@ -744,6 +761,27 @@ static void core_perf_log() {
 
 static bool core_environment(unsigned cmd, void *data) {
 	switch (cmd) {
+    // case RETRO_ENVIRONMENT_SET_CONTROLLER_INFO: {
+    //     const struct retro_controller_info* info = (const struct retro_controller_info*)data;
+        
+    //     printf("Port %d supports %d controller types:\n", 0, info[0].num_types);
+        
+    //      for (unsigned i = 0; i < info[0].num_types; i++) {
+    //         printf("  - %s (id: %d)\n", info[0].types[i].desc, info[0].types[i].id);
+    //     }
+    //     return true;
+    // }
+
+    // case RETRO_ENVIRONMENT_GET_INPUT_DEVICE_CAPABILITIES: {
+    //     uint64_t* caps = (uint64_t*)data;
+    //     *caps = (1 << RETRO_DEVICE_JOYPAD);
+    //     return true;
+    // }
+
+    // case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS: {
+    //     return true;
+    // };
+
     case RETRO_ENVIRONMENT_SET_VARIABLES: {
         const struct retro_variable *vars = (const struct retro_variable *)data;
         size_t num_vars = 0;
@@ -799,6 +837,12 @@ static bool core_environment(unsigned cmd, void *data) {
 
         if (!g_vars)
             return false;
+
+        if(!strcmp(var->key, "pcsx2_renderer")) {
+            var->value = strdup("Software");
+            printf("Get Variable: %s = %s\n", var->key, var->value);
+            return true;
+        }
 
         for (const struct retro_variable *v = g_vars; v->key; ++v) {
             if (strcmp(var->key, v->key) == 0) {
@@ -913,22 +957,29 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
 
 
 static void core_input_poll(void) {
-	int i;
-    g_kbd = SDL_GetKeyboardState(NULL);
-
-	for (i = 0; g_binds[i].k || g_binds[i].rk; ++i)
-        g_joy[g_binds[i].rk] = g_kbd[g_binds[i].k];
-
-    if (g_kbd[SDL_SCANCODE_ESCAPE])
-        running = false;
 }
 
 
 static int16_t core_input_state(unsigned port, unsigned device, unsigned index, unsigned id) {
-	if (port || index || device != RETRO_DEVICE_JOYPAD)
-		return 0;
 
-	return g_joy[id];
+    if (port >= MAX_PLAYERS) return 0;
+    
+    if ((device == RETRO_DEVICE_JOYPAD || device == RETRO_DEVICE_ANALOG) && index == 0) {
+        if (id < N_BUTTONS) {
+            printf("Input state: port %u, device %u, index %u, id %u\n", port, device, index, id);
+
+            printf("Input value: %u\n\n", m_buttonMask[port][id]);
+
+            return m_buttonMask[port][id] ? 1 : 0;
+        }
+    }
+    
+    if (device == RETRO_DEVICE_ANALOG && index != 0) {
+        return 0;
+    }
+
+
+	return 0;
 }
 
 
@@ -965,6 +1016,9 @@ static void core_load(const char *sofile) {
 	load_retro_sym(retro_reset);
 	load_retro_sym(retro_run);
 	load_retro_sym(retro_load_game);
+    load_retro_sym(retro_unserialize);
+    load_retro_sym(retro_serialize);
+    load_retro_sym(retro_serialize_size);
 	load_retro_sym(retro_unload_game);
 
 	load_sym(set_environment, retro_set_environment);
@@ -1053,19 +1107,46 @@ static void core_unload() {
 
 static void noop() {}
 
-EXPORT void get_frame(uint8_t* buffer, int width, int height) {
+
+bool get_state(void* data) {
+    size_t size = g_retro.retro_serialize_size();
+    return g_retro.retro_serialize(data, size);
+}
+
+size_t get_state_size() {
+    return g_retro.retro_serialize_size();
+}
+
+bool load_state(const void* data, size_t size) {
+    return g_retro.retro_unserialize(data, size);
+}
+
+void get_frame(uint8_t* buffer, int width, int height) {
     SDL_GL_MakeCurrent(g_win, g_ctx);
     
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, buffer);
 }
 
-EXPORT void run() {
+void run() {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     g_retro.retro_run();
 }
 
-EXPORT void init(char *core, char *game) {
+void reset() {
+    memset(m_buttonMask, 0, sizeof(m_buttonMask));
+
+	g_retro.retro_reset();
+
+    // g_retro.retro_set_controller_port_device(0, RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 1));
+    // g_retro.retro_set_controller_port_device(1, RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_JOYPAD, 1));
+}
+
+void setKey(int port, int key, bool active) { 
+    m_buttonMask[port][key] = active; 
+}
+
+void init(char *core, char *game) {
     if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO|SDL_INIT_EVENTS) < 0)
         die("Failed to initialize SDL");
 
@@ -1085,7 +1166,7 @@ EXPORT void init(char *core, char *game) {
     // g_retro.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
     g_retro.retro_set_controller_port_device(0, RETRO_DEVICE_KEYBOARD);
 
-    SDL_Event ev;
+    // SDL_Event ev;
 
     // while (running) {
     //     // Update the game loop timer.
@@ -1139,3 +1220,66 @@ EXPORT void init(char *core, char *game) {
 #ifdef __cplusplus
 }
 #endif
+
+struct RetroEmulator {
+    void initCore(char *core, char *game) {
+        init(core, game);
+    }
+
+    void runCore() {
+        run();
+    }
+
+    void resetCore() {
+        reset();
+    }
+
+    bool setState(py::bytes o) {
+        try {
+            return g_retro.retro_unserialize(PyBytes_AsString(o.ptr()), PyBytes_Size(o.ptr()));
+        } catch(...) {
+            return false;
+        }
+		
+	}
+
+    py::bytes getState() {
+		size_t size = get_state_size();
+		py::bytes bytes(NULL, size);
+		g_retro.retro_serialize(PyBytes_AsString(bytes.ptr()), size);
+		return bytes;
+	}
+
+    void getFrame(py::buffer buf, int width, int height) {
+        py::buffer_info info = buf.request();
+
+        uint8_t* buffer = static_cast<uint8_t*>(info.ptr);
+
+        get_frame(buffer, width, height);
+    }
+
+    void setButtonMask(py::array_t<uint8_t> mask, unsigned player) {
+		if (mask.size() > N_BUTTONS) {
+			throw std::runtime_error("mask.size() > N_BUTTONS");
+		}
+		if (player >= MAX_PLAYERS) {
+			throw std::runtime_error("player >= MAX_PLAYERS");
+		}
+
+		for (int key = 0; key < mask.size(); ++key) {
+			setKey(player, key, mask.data()[key]);
+		}
+	}
+};
+
+PYBIND11_MODULE(_retro, m) {
+    py::class_<RetroEmulator>(m, "RetroEmulator")
+        .def(py::init<>())
+        .def("run", &RetroEmulator::runCore)
+        .def("reset", &RetroEmulator::resetCore)
+        .def("set_button_mask", &RetroEmulator::setButtonMask, py::arg("mask"), py::arg("player")=0)
+        .def("get_state", &RetroEmulator::getState)
+        .def("set_state", &RetroEmulator::setState)
+        .def("get_frame", &RetroEmulator::getFrame, py::arg("buffer"), py::arg("width"), py::arg("height"))
+        .def("init", &RetroEmulator::initCore, py::arg("core"), py::arg("game"));
+}

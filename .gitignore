@@ -15,3 +15,7 @@ cmake_install.cmake
 *.ilk
 *.lib
 *.pdb
+*.pyd
+_retro.*
+*.state
+third-party/
