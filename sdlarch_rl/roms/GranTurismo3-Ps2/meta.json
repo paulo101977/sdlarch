@@ -1,0 +1,35 @@
+{
+    "savestate": "1",
+    "variables": [
+        {
+            "name": "velocity",
+            "size": "0",
+            "address": "0x01FABF74"
+        },
+        {
+            "name": "gear",
+            "size": "0",
+            "address": "0x01FABF98"
+        },
+        {
+            "name": "position",
+            "size": "0",
+            "address": "0x01FA1E7C"
+        },
+        {
+            "name": "current_lap",
+            "size": "0",
+            "address": "0x01FBF92C"
+        },
+        {
+            "name": "max_lap",
+            "size": "0",
+            "address": "0x01FA1E5C"
+        },
+        {
+            "name": "wrong_way",
+            "size": "0",
+            "address": "0x01FBCC5C"
+        }
+    ]
+}

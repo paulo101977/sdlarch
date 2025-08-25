@@ -1,0 +1,10 @@
+LICENSE
+README.md
+setup.py
+sdlarch_rl/pcsx2_core.py
+sdlarch_rl.egg-info/PKG-INFO
+sdlarch_rl.egg-info/SOURCES.txt
+sdlarch_rl.egg-info/dependency_links.txt
+sdlarch_rl.egg-info/requires.txt
+sdlarch_rl.egg-info/top_level.txt
+sdlarch_rl/utils/discretizer.py

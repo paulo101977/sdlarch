@@ -1,0 +1,53 @@
+Metadata-Version: 2.1
+Name: sdlarch-rl
+Version: 0.0.1
+Home-page: https://github.com/paulo101977/sdlarch-rl
+Author: Paulo Sérgio
+Author-email: paulo10.1977@yahoo.com.br
+License: MIT
+Requires-Python: >=3.8.0,<3.13
+Description-Content-Type: text/markdown
+License-File: LICENSE
+
+# sdlarch-rl
+
+This is a fork of sdlarch that aims to develop RL projects.
+
+## sdlarch
+
+sdlarch is a small libretro frontend (sdlarch.c has less than 1000 lines of
+code) created for educational purposes. It only provides the required (video,
+audio and basic input) features to run basic libretro cores and there's no UI
+or configuration support.
+
+## Building
+
+- Linux:
+
+```shell
+cmake .
+make
+```
+
+- Windows:
+
+```shell
+cmake .
+nmake
+```
+
+## TODO
+
+- [x] Run PCSX2 Core
+- [ ] Load PCSX2 States
+- [ ] Gymnasium compatibility
+- [ ] Load Emulator memory
+- [ ] Load games in the same standard as stable-retro
+- [ ] Improve performance
+- [ ] Load another cores (Dolphin, etc)
+
+## Our Youtube Channel
+
+If you are interested in our AI projects, visit our channel:
+
+[AI Brain](https://www.youtube.com/@AiBrainAi?sub_confirmation=1)
