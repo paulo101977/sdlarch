@@ -166,8 +166,6 @@ class PCSX2Core(gym.Env):
     def _get_observation(self) -> np.ndarray:
         height, width = self.em.get_shape()
 
-        print(f"Frame size: {width}x{height}" )
-
         buffer = (ctypes.c_uint8 * (width * height * 3))()
         self.em.get_frame(buffer, width, height)
         
