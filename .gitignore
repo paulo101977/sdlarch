@@ -20,5 +20,5 @@ _retro.*
 *.state
 third-party/
 *.a
-__pycache__/*
+**/__pycache__/*
 sdlarch_rl/roms/**/rom.*

@@ -40,12 +40,23 @@ static retro_usec_t runloop_frame_time_last = 0;
 static const uint8_t *g_kbd = NULL;
 static struct retro_audio_callback audio_callback;
 
-static float g_scale = 3;
+static float g_scale = 1;
 bool running = true;
 
 const int N_BUTTONS = 16;
 const int MAX_PLAYERS = 2;
 static bool m_buttonMask[MAX_PLAYERS][N_BUTTONS]{};
+
+// log function that prints to python console
+void c_printf(const char* format, ...) {
+    char buffer[256];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+    
+    py::print(buffer);
+}
 
 static struct {
 	GLuint tex_id;
@@ -165,6 +176,8 @@ static struct {
 //	unsigned retro_get_region(void);
 //	void *retro_get_memory_data(unsigned id);
 //	size_t retro_get_memory_size(unsigned id);
+    int width;
+    int height;
 } g_retro;
 
 
@@ -455,8 +468,8 @@ static void video_configure(const struct retro_game_geometry *geom) {
 
 	resize_to_aspect(geom->aspect_ratio, geom->base_width * 1, geom->base_height * 1, &nwidth, &nheight);
 
-	// nwidth *= g_scale;
-	// nheight *= g_scale;
+	nwidth *= g_scale;
+	nheight *= g_scale;
 
 	if (!g_win)
 		create_window(nwidth, nheight);
@@ -497,6 +510,9 @@ static void video_configure(const struct retro_game_geometry *geom) {
 	g_video.tex_h = geom->max_height;
 	g_video.clip_w = geom->base_width;
 	g_video.clip_h = geom->base_height;
+
+    g_retro.width = geom->base_width;
+    g_retro.height = geom->base_height;
 
 	refresh_vertex_data();
 
@@ -550,8 +566,10 @@ static void video_refresh(const void *data, unsigned width, unsigned height, uns
 						g_video.pixtype, g_video.pixfmt, data);
 	}
 
-    // geom -> base_width = width;
-    // geom -> base_height = height;
+    if( width != 0 && height != 0) {
+        g_retro.width = width;
+        g_retro.height = height; 
+    }
 
     int w = 0, h = 0;
     SDL_GetWindowSize(g_win, &w, &h);
@@ -759,6 +777,7 @@ static void core_perf_log() {
     core_log(RETRO_LOG_INFO, "[timer] %s: %i - %i", g_retro.perf_counter_last->ident, g_retro.perf_counter_last->start, g_retro.perf_counter_last->total);
 }
 
+
 static bool core_environment(unsigned cmd, void *data) {
 	switch (cmd) {
     // case RETRO_ENVIRONMENT_SET_CONTROLLER_INFO: {
@@ -917,7 +936,8 @@ static bool core_environment(unsigned cmd, void *data) {
         g_video.clip_w = geom->base_width;
         g_video.clip_h = geom->base_height;
 
-        printf("Set geometry: ----->>>> %u %u %u %u\n", geom->base_width, geom->base_height, geom->max_width, geom->max_height);
+        g_retro.width = geom->base_width;
+        g_retro.height = geom->base_height;
 
         // some cores call this before we even have a window
         if (g_win) {
@@ -926,8 +946,8 @@ static bool core_environment(unsigned cmd, void *data) {
             int ow = 0, oh = 0;
             resize_to_aspect(geom->aspect_ratio, geom->base_width, geom->base_height, &ow, &oh);
 
-            // ow *= g_scale;
-            // oh *= g_scale;
+            ow *= g_scale;
+            oh *= g_scale;
 
             SDL_SetWindowSize(g_win, ow, oh);
         }
@@ -1137,7 +1157,7 @@ bool load_state(const void* data, size_t size) {
 
 void get_frame(uint8_t* buffer, int width, int height) {
     SDL_GL_MakeCurrent(g_win, g_ctx);
-    
+
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, buffer);
 }
@@ -1166,7 +1186,7 @@ void init(char *core, char *game) {
 
     g_video.hw.version_major = 4;
     g_video.hw.version_minor = 5;
-    g_video.hw.context_type  = RETRO_HW_CONTEXT_OPENGL_CORE;
+    g_video.hw.context_type  = RETRO_HW_CONTEXT_OPENGLES3;
     g_video.hw.context_reset   = noop;
     g_video.hw.context_destroy = noop;
 
@@ -1273,6 +1293,10 @@ struct RetroEmulator {
         get_frame(buffer, width, height);
     }
 
+    py::tuple getShape() {
+        return py::make_tuple(g_retro.height, g_retro.width);
+    }
+
     void setButtonMask(py::array_t<uint8_t> mask, unsigned player) {
 		if (mask.size() > N_BUTTONS) {
 			throw std::runtime_error("mask.size() > N_BUTTONS");
@@ -1296,5 +1320,6 @@ PYBIND11_MODULE(_retro, m) {
         .def("get_state", &RetroEmulator::getState)
         .def("set_state", &RetroEmulator::setState)
         .def("get_frame", &RetroEmulator::getFrame, py::arg("buffer"), py::arg("width"), py::arg("height"))
+        .def("get_shape", &RetroEmulator::getShape)
         .def("init", &RetroEmulator::initCore, py::arg("core"), py::arg("game"));
 }

@@ -5,12 +5,10 @@ import numpy as np
 import gymnasium as gym
 import json
 import cv2
-# import importlib.util as import_util
-# import mss
-# import dxcam
+import importlib.util as import_util
 import gc
 from _retro import RetroEmulator
-
+import ctypes
 
 class PCSX2Core(gym.Env):
     """
@@ -29,6 +27,7 @@ class PCSX2Core(gym.Env):
     ) -> None:
 
         self.em = RetroEmulator()
+        self.players = players
 
         # TODO: get correct path to core and game
         core = os.path.abspath("../cores/pcsx2_libretro.so")
@@ -55,7 +54,9 @@ class PCSX2Core(gym.Env):
         # rum the emulator main process
         self.em.init(core, game)
 
-        pcsx2_json = os.path.join(self.dirname, r"pcsx2.json")
+        self.em.run()
+
+        pcsx2_json = os.path.join(self.dirname, r"cores/ps2/pcsx2.json")
 
         with open(pcsx2_json) as f:
             pcsx2_button = json.load(f)
@@ -73,27 +74,28 @@ class PCSX2Core(gym.Env):
 
         self.action_space = gym.spaces.MultiBinary(len(self.buttons) * players)
 
-        # TODO get image shape from emulator
+        observation = self._get_observation()
+
         self.observation_space = gym.spaces.Box(
             low=0,
             high=255,
-            shape=(480, 640, 3),
+            shape=observation.shape,
             dtype=np.uint8,
         )
         
         self.img = None
 
         # TODO: load reward code dynamically
-        # reward_path = os.path.join(self.dirname, r"roms", f"{gamename}", f"reward.py")
+        reward_path = os.path.join(self.dirname, r"roms", f"{gamename}", f"reward.py")
 
-        # if not os.path.isfile(reward_path):
-        #     raise FileNotFoundError(f"Reward file not found: {reward_path}. Please ensure the path is correct.")
+        if not os.path.isfile(reward_path):
+            raise FileNotFoundError(f"Reward file not found: {reward_path}. Please ensure the path is correct.")
 
         # Load the reward function from the specified file
-        # spec = import_util.spec_from_file_location("dynamic_module", reward_path)
-        # module = import_util.module_from_spec(spec)
-        # spec.loader.exec_module(module)
-        # self.reward_fn = module.reward
+        spec = import_util.spec_from_file_location("dynamic_module", reward_path)
+        module = import_util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.reward_fn = module.reward
 
         self.count = 0
 
@@ -105,8 +107,12 @@ class PCSX2Core(gym.Env):
 
         super().reset(seed=seed, options=options)
 
+        self.em.run()
 
         observation = self._get_observation()
+
+        # TODO: get initial info from memory
+        # TODO: reset to a specific state
 
         self.count = 0
         
@@ -122,66 +128,55 @@ class PCSX2Core(gym.Env):
         if self.img is None:
             raise RuntimeError("Please call env.reset() before env.step()")
 
-        self._ensure_sync(self.hwnd)
+        # TODO: set buttons for all players
+        for player in range(self.players):
+            self.em.set_button_mask(actions, player)
 
-        self._exec_actions(actions)
+        self.em.run()
 
         observation = self._get_observation()
 
-        info = self._memory_to_info()
+        # TODO: get info from memory
+        # info = self._memory_to_info()
 
-        reward, done = self._get_reward(self.old_info, info)
+        # TODO: get reward from info
+        # reward, done = self._get_reward(self.old_info, info)
 
-
+        info = {}
         self.old_info = info
 
         self.count += 1
 
+        # TODO: set reward, done, truncated, info correctly
         return observation, 0, False, False, {}
 
     def close(self) -> None:
         """
         Close the controller and clean up resources.
         """
+        # TODO: properly close the emulator
+        # if self.process:
+        #     self.process.terminate()
+        #     self.process.wait()
 
-        if self.process:
-            self.process.terminate()
-            self.process.wait()
-
-        if hasattr(self, 'libipc'):
-            self.libipc.pine_pcsx2_delete(self.ipc)
+        # if hasattr(self, 'libipc'):
+        #     self.libipc.pine_pcsx2_delete(self.ipc)
+        pass
 
     def _get_observation(self) -> np.ndarray:
-        # if self.hwnd == 0:
-        #     raise ValueError("HWND of window not found")
+        height, width = self.em.get_shape()
 
-        # left, top, right, bottom = win32gui.GetWindowRect(self.hwnd)
-        # width, height = right - left, bottom - top
-        # region = (left, top, width, height)  # x, y, w, h
-        frame = self.camera.get_latest_frame()
+        print(f"Frame size: {width}x{height}" )
 
-        self.img = frame
-
-        if self.count > 0 and self.count % 1000 == 0:
-            gc.collect()
-
-        return cv2.resize(frame, (640, 480), interpolation=cv2.INTER_NEAREST)
+        buffer = (ctypes.c_uint8 * (width * height * 3))()
+        self.em.get_frame(buffer, width, height)
+        
+        img = np.frombuffer(buffer, dtype=np.uint8)
+        img = img.reshape((height, width, 3))[::-1]
+        self.img = img
+        return self.img
 
     
-    def _exec_actions(self, actions: np.ndarray) -> None:
-        """
-        Executes the actions on the emulator.
-        :param actions: A numpy array of actions to be executed.
-        """
-
-        action_set = set()
-
-        for idx, action in enumerate(actions):
-            # print(idx, action)
-            if action == 1 and (self.buttons[idx] in self.key_map):
-                action_set.add(self.key_map[self.buttons[idx]])
-
-
     def _memory_to_info(self) -> dict:
         """
         Reads specific memory addresses to extract game-related information.
