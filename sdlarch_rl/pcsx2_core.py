@@ -118,6 +118,14 @@ class PCSX2Core(gym.Env):
         
         return observation, {}
 
+    def get_memory(self, address: int) -> int:
+        """
+        Read a byte from the specified memory address.
+        """
+
+        data = self.em.get_ram()[address]
+        return data
+
     def step(self, actions: np.ndarray):
         """
         Execute one time step within the environment.

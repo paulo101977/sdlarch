@@ -112,41 +112,41 @@ static const char *g_fshader_src =
     "}";
 
 static map<string, const char*> s_envVariables = {
-	{ "pcsx2_enable_hw_hacks", "disabled" },
+	{ "pcsx2_enable_hw_hacks", "enabled" },
 	{ "pcsx2_renderer", "Software" },
-	// { "pcsx2_software_clut_render", "Normal" },
-	// { "pcsx2_bios", "scph39001.bin" },
-	// { "pcsx2_fastboot", "enabled" },
-	// { "pcsx2_fastcdvd", "disabled" },
-	// { "pcsx2_pgs_ssaa", "Native" },
-	// { "pcsx2_pgs_ss_tex", "disabled" },
-	// { "pcsx2_pgs_deblur", "disabled" },
-	// { "pcsx2_pgs_high_res_scanout", "disabled" },
-	// { "pcsx2_pgs_disable_mipmaps", "disabled" },
-	// { "pcsx2_nointerlacing_hint", "disabled" },
-	// { "pcsx2_pcrtc_antiblur", "disabled" },
-	// { "pcsx2_pcrtc_screen_offsets", "disabled" },
-	// { "pcsx2_disable_interlace_offset", "disabled" },
-	// { "pcsx2_deinterlace_mode", "Automatic" },
-	// { "pcsx2_enable_cheats", "disabled" },
-	// { "pcsx2_hint_language_unlock", "disabled" },
-	// { "pcsx2_ee_cycle_rate", "100% (Normal Speed)" },
-	// { "pcsx2_widescreen_hint", "disabled" },
-	// { "pcsx2_uncapped_framerate_hint", "disabled" },
-	// { "pcsx2_game_enhancements_hint", "disabled" },
-	// { "pcsx2_ee_cycle_skip", "disabled" },
-	// { "pcsx2_axis_scale1", "133%" },
-	// { "pcsx2_axis_deadzone1", "15%" },
-	// { "pcsx2_button_deadzone1", "0%" },
-	// { "pcsx2_enable_rumble1", "100%" },
-	// { "pcsx2_invert_left_stick1", "disabled" },
-	// { "pcsx2_invert_right_stick1", "disabled" },
-	// { "pcsx2_axis_scale2", "133%" },
-	// { "pcsx2_axis_deadzone2", "15%" },
-	// { "pcsx2_button_deadzone2", "0%" },
-	// { "pcsx2_enable_rumble2", "100%" },
-	// { "pcsx2_invert_left_stick2", "disabled" },
-	// { "pcsx2_invert_right_stick2", "disabled" },
+	{ "pcsx2_software_clut_render", "Normal" },
+	{ "pcsx2_fastboot", "enabled" },
+    { "pcsx2_blending_accuracy", "Medium" },
+	{ "pcsx2_pgs_ssaa", "Native" },
+	{ "pcsx2_pgs_ss_tex", "disabled" },
+	{ "pcsx2_pgs_deblur", "disabled" },
+	{ "pcsx2_pgs_high_res_scanout", "disabled" },
+	{ "pcsx2_pgs_disable_mipmaps", "disabled" },
+	{ "pcsx2_nointerlacing_hint", "disabled" },
+	{ "pcsx2_pcrtc_antiblur", "disabled" },
+	{ "pcsx2_pcrtc_screen_offsets", "disabled" },
+	{ "pcsx2_disable_interlace_offset", "disabled" },
+	{ "pcsx2_deinterlace_mode", "Automatic" },
+	{ "pcsx2_enable_cheats", "disabled" },
+	{ "pcsx2_hint_language_unlock", "disabled" },
+	{ "pcsx2_ee_cycle_rate", "100% (Normal Speed)" },
+	{ "pcsx2_widescreen_hint", "disabled" },
+	{ "pcsx2_uncapped_framerate_hint", "disabled" },
+	{ "pcsx2_game_enhancements_hint", "disabled" },
+	{ "pcsx2_ee_cycle_skip", "disabled" },
+	{ "pcsx2_axis_scale1", "133%" },
+	{ "pcsx2_axis_deadzone1", "0%" },
+	{ "pcsx2_button_deadzone1", "0%" },
+    { "pcsx2_button_deadzone2", "0%" },
+	{ "pcsx2_enable_rumble1", "disabled" },
+    { "pcsx2_enable_rumble2", "disabled" },
+	{ "pcsx2_invert_left_stick1", "disabled" },
+	{ "pcsx2_invert_right_stick1", "disabled" },
+	{ "pcsx2_axis_scale2", "133%" },
+	{ "pcsx2_axis_deadzone2", "15%" },
+	{ "pcsx2_button_deadzone2", "0%" },
+	{ "pcsx2_invert_left_stick2", "disabled" },
+	{ "pcsx2_invert_right_stick2", "disabled" },
 };
 
 
@@ -174,8 +174,8 @@ static struct {
 //	bool retro_load_game_special(unsigned game_type, const struct retro_game_info *info, size_t num_info);
 	void (*retro_unload_game)(void);
 //	unsigned retro_get_region(void);
-//	void *retro_get_memory_data(unsigned id);
-//	size_t retro_get_memory_size(unsigned id);
+	void* (*retro_get_memory_data)(unsigned id);
+	size_t (*retro_get_memory_size)(unsigned id);
     int width;
     int height;
 } g_retro;
@@ -780,26 +780,14 @@ static void core_perf_log() {
 
 static bool core_environment(unsigned cmd, void *data) {
 	switch (cmd) {
-    // case RETRO_ENVIRONMENT_SET_CONTROLLER_INFO: {
-    //     const struct retro_controller_info* info = (const struct retro_controller_info*)data;
+    case RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE:
         
-    //     printf("Port %d supports %d controller types:\n", 0, info[0].num_types);
-        
-    //      for (unsigned i = 0; i < info[0].num_types; i++) {
-    //         printf("  - %s (id: %d)\n", info[0].types[i].desc, info[0].types[i].id);
-    //     }
-    //     return true;
-    // }
-
-    // case RETRO_ENVIRONMENT_GET_INPUT_DEVICE_CAPABILITIES: {
-    //     uint64_t* caps = (uint64_t*)data;
-    //     *caps = (1 << RETRO_DEVICE_JOYPAD);
-    //     return true;
-    // }
-
-    // case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS: {
-    //     return true;
-    // };
+        return false;
+    case RETRO_ENVIRONMENT_GET_INPUT_DEVICE_CAPABILITIES: {
+        uint64_t* caps = (uint64_t*)data;
+        *caps = (1 << RETRO_DEVICE_JOYPAD);
+        return true;
+    }
 
     case RETRO_ENVIRONMENT_SET_VARIABLES: {
         const struct retro_variable *vars = (const struct retro_variable *)data;
@@ -832,17 +820,17 @@ static bool core_environment(unsigned cmd, void *data) {
 
             outvar->key = strdup(invar->key);
 
+            if (s_envVariables.count(string(outvar->key))) {
+                // var->value = s_envVariables[string(var->key)];
+                outvar->value = strdup(s_envVariables[string(outvar->key)]);
+            }
+
             if(!strcmp(outvar->key, "dolphin_renderer")) {
                 free((void*)outvar->value);
                 outvar->value = strdup("Software");
             }
 
-            if(!strcmp(outvar->key, "pcsx2_renderer")) {
-                free((void*)outvar->value);
-                outvar->value = strdup("Software");
-            }
-
-            printf("Variable: %s = %s\n", outvar->key, outvar->value);
+            c_printf("Variable: %s = %s\n", outvar->key, outvar->value);
 
             SDL_assert(outvar->key && outvar->value);
         }
@@ -857,11 +845,11 @@ static bool core_environment(unsigned cmd, void *data) {
         if (!g_vars)
             return false;
 
-        if(!strcmp(var->key, "pcsx2_renderer")) {
-            var->value = strdup("Software");
-            printf("Get Variable: %s = %s\n", var->key, var->value);
-            return true;
-        }
+        // if(!strcmp(var->key, "pcsx2_renderer")) {
+        //     var->value = strdup("Software");
+        //     printf("Get Variable: %s = %s\n", var->key, var->value);
+        //     return true;
+        // }
 
         for (const struct retro_variable *v = g_vars; v->key; ++v) {
             if (strcmp(var->key, v->key) == 0) {
@@ -991,10 +979,17 @@ static void core_input_poll(void) {
 static int16_t core_input_state(unsigned port, unsigned device, unsigned index, unsigned id) {
 
     if (port >= MAX_PLAYERS) return 0;
+
+    // analog button (treat as digital)
+    if (index == RETRO_DEVICE_INDEX_ANALOG_BUTTON && device == RETRO_DEVICE_ANALOG) {
+        // int16_t value = g_joy[id] ? 255 : 0;
+        int16_t value = g_joy[id] ? 32767 : 0;
+        return value;
+    }
     
     // convert to button mask (PCSX2 style)
     if (device == RETRO_DEVICE_JOYPAD && id == RETRO_DEVICE_ID_JOYPAD_MASK) {
-        uint32_t mask = 0;
+        int16_t mask = 0;
         for (int i = 0; i < N_BUTTONS; i++) {
             if (m_buttonMask[port][i]) {
                 mask |= (1 << i);
@@ -1054,6 +1049,8 @@ static void core_load(const char *sofile) {
     load_retro_sym(retro_serialize);
     load_retro_sym(retro_serialize_size);
 	load_retro_sym(retro_unload_game);
+    load_retro_sym(retro_get_memory_data);
+    load_retro_sym(retro_get_memory_size);
 
 	load_sym(set_environment, retro_set_environment);
 	load_sym(set_video_refresh, retro_set_video_refresh);
@@ -1278,6 +1275,30 @@ struct RetroEmulator {
 		
 	}
 
+    py::array_t<uint8_t> getMemoryByType(unsigned type) {
+        // Get memory pointer and size from core
+        void* memory_data = g_retro.retro_get_memory_data(type);
+        size_t memory_size = g_retro.retro_get_memory_size(type);
+        
+        if (!memory_data || memory_size == 0) {
+            throw std::runtime_error("Invalid memory region or not available");
+        }
+        
+        // Create a numpy array that references the memory without copying
+        py::array_t<uint8_t> array(
+            {memory_size},                            // shape
+            {sizeof(uint8_t)},                        // strides
+            static_cast<uint8_t*>(memory_data),       // data pointer
+            py::capsule(memory_data, [](void* f) {})  // capsule (no deleter since we don't own the memory)
+        );
+        
+        return array;
+    }
+
+    py::array_t<uint8_t> getRAM() {
+        return getMemoryByType(RETRO_MEMORY_SYSTEM_RAM);
+    }
+
     py::bytes getState() {
 		size_t size = get_state_size();
 		py::bytes bytes(NULL, size);
@@ -1321,5 +1342,6 @@ PYBIND11_MODULE(_retro, m) {
         .def("set_state", &RetroEmulator::setState)
         .def("get_frame", &RetroEmulator::getFrame, py::arg("buffer"), py::arg("width"), py::arg("height"))
         .def("get_shape", &RetroEmulator::getShape)
+        .def("get_ram", &RetroEmulator::getRAM)
         .def("init", &RetroEmulator::initCore, py::arg("core"), py::arg("game"));
 }
