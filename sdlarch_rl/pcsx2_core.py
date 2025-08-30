@@ -29,9 +29,8 @@ class PCSX2Core(gym.Env):
         self.em = RetroEmulator()
         self.players = players
 
-        # TODO: get correct path to core and game
-        core = os.path.abspath("../cores/pcsx2_libretro.so")
-        game = os.path.abspath("../../roms/Granturismo3.iso")
+        # TODO: get correct path to core
+        core = os.path.abspath("../pcsx2_libretro.so")
         
         gc.collect()
 
@@ -111,6 +110,7 @@ class PCSX2Core(gym.Env):
 
         observation = self._get_observation()
 
+        # TODO: reset the core here
         # TODO: get initial info from memory
         # TODO: reset to a specific state
 

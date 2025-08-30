@@ -39,6 +39,9 @@ static struct retro_frame_time_callback runloop_frame_time;
 static retro_usec_t runloop_frame_time_last = 0;
 static const uint8_t *g_kbd = NULL;
 static struct retro_audio_callback audio_callback;
+static char* m_romPath;
+static char* m_corePath;
+static bool gameLoaded = false;
 
 static float g_scale = 1;
 bool running = true;
@@ -1072,11 +1075,20 @@ static void core_load(const char *sofile) {
 	puts("Core loaded");
 }
 
+static void unload_game() {
+    g_retro.retro_unload_game();
+}
+
 
 static void core_load_game(const char *filename) {
 	struct retro_system_av_info av = {0};
 	struct retro_system_info system = {0};
 	struct retro_game_info info = { filename, 0 };
+    
+    if (gameLoaded) {
+        unload_game();
+        gameLoaded = false;
+    }
 
     info.path = filename;
     info.meta = "";
@@ -1115,6 +1127,7 @@ static void core_load_game(const char *filename) {
 		die("The core failed to load the content.");
 
 	g_retro.retro_get_system_av_info(&av);
+    gameLoaded = true;
 
 	video_configure(&av.geometry);
 	// audio_init(av.timing.sample_rate);
@@ -1168,9 +1181,6 @@ void reset() {
     memset(m_buttonMask, 0, sizeof(m_buttonMask));
 
 	g_retro.retro_reset();
-
-    g_retro.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
-    g_retro.retro_set_controller_port_device(1, RETRO_DEVICE_JOYPAD);
 }
 
 void setKey(int port, int key, bool active) { 
@@ -1186,6 +1196,9 @@ void init(char *core, char *game) {
     g_video.hw.context_type  = RETRO_HW_CONTEXT_OPENGLES3;
     g_video.hw.context_reset   = noop;
     g_video.hw.context_destroy = noop;
+
+    m_romPath = strdup(game);
+    m_corePath = strdup(core);
 
     // Load the core.
     core_load(core);
@@ -1275,6 +1288,13 @@ struct RetroEmulator {
 		
 	}
 
+    py::bytes getState() {
+		size_t size = get_state_size();
+		py::bytes bytes(NULL, size);
+		g_retro.retro_serialize(PyBytes_AsString(bytes.ptr()), size);
+		return bytes;
+	}
+
     py::array_t<uint8_t> getMemoryByType(unsigned type) {
         // Get memory pointer and size from core
         void* memory_data = g_retro.retro_get_memory_data(type);
@@ -1298,13 +1318,6 @@ struct RetroEmulator {
     py::array_t<uint8_t> getRAM() {
         return getMemoryByType(RETRO_MEMORY_SYSTEM_RAM);
     }
-
-    py::bytes getState() {
-		size_t size = get_state_size();
-		py::bytes bytes(NULL, size);
-		g_retro.retro_serialize(PyBytes_AsString(bytes.ptr()), size);
-		return bytes;
-	}
 
     void getFrame(py::buffer buf, int width, int height) {
         py::buffer_info info = buf.request();
