@@ -1,6 +1,6 @@
 # sdlarch-rl
 
-This is a fork of sdlarch that aims to develop RL projects.
+This is a fork of sdlarch that aims to develop RL (Reinforcement Learning) projects.
 
 ## sdlarch
 
