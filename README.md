@@ -11,14 +11,14 @@ or configuration support.
 
 ## Building
 
-- Linux:
+### Linux:
 
 ```shell
 cmake .
 make
 ```
 
-- Windows:
+### Windows:
 
 ```shell
 cmake .
@@ -28,7 +28,10 @@ nmake
 ## TODO
 
 - [x] Run PCSX2 Core
-- [ ] Load PCSX2 States
+- [x] Load PCSX2 States
+- [ ] Compile cores in build
+- [ ] Tool to add games/map memory/save states, etc.
+- [ ] Load PCSX2 state from file
 - [ ] Gymnasium compatibility
 - [ ] Load Emulator memory
 - [ ] Load games in the same standard as stable-retro

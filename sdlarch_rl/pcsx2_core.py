@@ -29,8 +29,6 @@ class PCSX2Core(gym.Env):
         self.em = RetroEmulator()
         self.players = players
 
-        # TODO: get correct path to core
-        core = os.path.abspath("../pcsx2_libretro.so")
         
         gc.collect()
 
@@ -38,6 +36,13 @@ class PCSX2Core(gym.Env):
             self.spec = None
 
         self.dirname = os.path.dirname(__file__)
+
+        # TODO: get correct path to core
+        # TODO: make sure the core is built for the correct architecture
+        core = os.path.join(self.dirname, "./cores/ps2/pcsx2_libretro.so")
+
+        if not os.path.isfile(core):
+            raise FileNotFoundError(f"Core file not found: {core}. Please ensure the path is correct.")
         
 
         if not os.path.exists(os.path.join(self.dirname, r"roms", f"{gamename}")):
