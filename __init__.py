@@ -1,6 +1,6 @@
 import os
 import sys
-from sdlarch_rl.pcsx2_core import PCSX2Core
+from sdlarch_rl.sdlenv import SDLEnv
 from sdlarch_rl.utils.discretizer import MainDiscretizer
 
 ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -16,7 +16,7 @@ __all__ = [
     # "State",
     # "Observations",
     # "get_core_path",
-    "PCSX2Core",
+    "SDLEnv",
     "MainDiscretizer",
     "make",
     # "RetroEnv",

@@ -10,7 +10,7 @@ import gc
 from _retro import RetroEmulator
 import ctypes
 
-class PCSX2Core(gym.Env):
+class SDLEnv(gym.Env):
     """
     PCSX2 environment class
 
@@ -24,6 +24,7 @@ class PCSX2Core(gym.Env):
         gamename: str,
         players = 1,
         env_id = 0,
+        render_mode="rgb_array",
     ) -> None:
 
         self.em = RetroEmulator()
@@ -55,7 +56,7 @@ class PCSX2Core(gym.Env):
         if not os.path.isfile(game):
             raise FileNotFoundError(f"ROM file not found: {rom}. Please ensure the path is correct.")
 
-        # rum the emulator main process
+        # starts the emulator main process
         self.em.init(core, game)
 
         self.em.run()
@@ -67,6 +68,7 @@ class PCSX2Core(gym.Env):
 
         self.buttons = pcsx2_button['buttons']
 
+        # TODO: load initial state if exists
 
         meta_path = os.path.join(self.dirname, r"roms", f"{gamename}", f"meta.json")
 
@@ -89,7 +91,6 @@ class PCSX2Core(gym.Env):
         
         self.img = None
 
-        # TODO: load reward code dynamically
         reward_path = os.path.join(self.dirname, r"roms", f"{gamename}", f"reward.py")
 
         if not os.path.isfile(reward_path):
@@ -103,6 +104,8 @@ class PCSX2Core(gym.Env):
 
         self.count = 0
 
+        self.render_mode = render_mode
+
     def reset(self, seed=None, options=None) -> tuple[np.ndarray, dict]:
         """
         Reset the controller and ensure the PCSX2 emulator is started.
@@ -111,23 +114,23 @@ class PCSX2Core(gym.Env):
 
         super().reset(seed=seed, options=options)
 
+        self.em.reset()
         self.em.run()
 
         observation = self._get_observation()
 
-        # TODO: reset the core here
-        # TODO: get initial info from memory
         # TODO: reset to a specific state
-
         self.count = 0
+
+        self.old_info = self._memory_to_info()
         
-        return observation, {}
+        return observation, self.old_info
 
-    def get_memory(self, address: int) -> int:
+    def _get_memory_value(self, address: int) -> int:
         """
-        Read a byte from the specified memory address.
+        Read a value from the specified memory address.
         """
-
+        # TODO: implement memory reading more then one byte
         data = self.em.get_ram()[address]
         return data
 
@@ -149,31 +152,24 @@ class PCSX2Core(gym.Env):
 
         observation = self._get_observation()
 
-        # TODO: get info from memory
-        # info = self._memory_to_info()
+        info = self._memory_to_info()
 
-        # TODO: get reward from info
-        # reward, done = self._get_reward(self.old_info, info)
+        reward, done = self._get_reward(self.old_info, info)
 
-        info = {}
         self.old_info = info
 
         self.count += 1
 
-        # TODO: set reward, done, truncated, info correctly
-        return observation, 0, False, False, {}
+        if self.render_mode == "human":
+            self.render()
+
+        return observation, reward, done, False, info
 
     def close(self) -> None:
         """
         Close the controller and clean up resources.
         """
-        # TODO: properly close the emulator
-        # if self.process:
-        #     self.process.terminate()
-        #     self.process.wait()
-
-        # if hasattr(self, 'libipc'):
-        #     self.libipc.pine_pcsx2_delete(self.ipc)
+        self.em.close()
         pass
 
     def _get_observation(self) -> np.ndarray:
@@ -197,9 +193,26 @@ class PCSX2Core(gym.Env):
         info = {
         }
 
+        for item in self.meta['variables']:
+            info[item['name']] = self._get_memory_value(int(item['address'], 16))
        
         return info
 
+    # TODO: implement render
+    def render(self) -> np.ndarray | None:
+        if self.render_mode == "human":
+            if self.img is None:
+                return None
+
+            img = cv2.cvtColor(self.img, cv2.COLOR_RGB2BGR)
+            cv2.imshow("env", img)
+            cv2.waitKey(1)
+            return None
+        elif self.render_mode == "rgb_array":
+            if self.img is None:
+                return None
+            return self.img
+        return None
     def _get_reward(self, old_info: dict, info: dict) -> tuple[dict, dict]:
         """
         Calculate the reward based on the current game state.

@@ -833,6 +833,11 @@ static bool core_environment(unsigned cmd, void *data) {
                 outvar->value = strdup("Software");
             }
 
+            if(!strcmp(outvar->key, "pcsx2_renderer")) {
+                free((void*)outvar->value);
+                outvar->value = strdup("Software");
+            }
+
             c_printf("Variable: %s = %s\n", outvar->key, outvar->value);
 
             SDL_assert(outvar->key && outvar->value);
@@ -948,11 +953,11 @@ static bool core_environment(unsigned cmd, void *data) {
         // g_retro.supports_no_game = *(bool*)data;
         return true;
     }
-    case RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE: {
-        int *value = (int*)data;
-        *value = 1 << 0 | 1 << 1;
-        return true;
-    }
+    // case RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE: {
+    //     int *value = (int*)data;
+    //     *value = 1 << 0 | 1 << 1;
+    //     return true;
+    // }
 	default:
 		core_log(RETRO_LOG_DEBUG, "Unhandled env #%u", cmd);
 		return false;
@@ -1188,8 +1193,11 @@ void setKey(int port, int key, bool active) {
 }
 
 void init(char *core, char *game) {
-    if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO|SDL_INIT_EVENTS) < 0)
+    if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_EVENTS) < 0) {
+    // if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO|SDL_INIT_EVENTS) < 0) {
+        printf("SDL_Init failed: %s\n", SDL_GetError());
         die("Failed to initialize SDL");
+    }
 
     g_video.hw.version_major = 4;
     g_video.hw.version_minor = 5;
@@ -1262,6 +1270,22 @@ void init(char *core, char *game) {
     // SDL_Quit();
 }
 
+void kill() {
+    core_unload();
+	// audio_deinit();
+	video_deinit();
+
+    if (g_vars) {
+        for (const struct retro_variable *v = g_vars; v->key; ++v) {
+            free((char*)v->key);
+            free((char*)v->value);
+        }
+        free(g_vars);
+    }
+
+    SDL_Quit();
+}
+
 #ifdef __cplusplus
 }
 #endif
@@ -1277,6 +1301,10 @@ struct RetroEmulator {
 
     void resetCore() {
         reset();
+    }
+
+    void closeCore() {
+        kill();
     }
 
     bool setState(py::bytes o) {
@@ -1356,5 +1384,6 @@ PYBIND11_MODULE(_retro, m) {
         .def("get_frame", &RetroEmulator::getFrame, py::arg("buffer"), py::arg("width"), py::arg("height"))
         .def("get_shape", &RetroEmulator::getShape)
         .def("get_ram", &RetroEmulator::getRAM)
+        .def("close", &RetroEmulator::closeCore)
         .def("init", &RetroEmulator::initCore, py::arg("core"), py::arg("game"));
 }
