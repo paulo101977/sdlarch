@@ -10,24 +10,16 @@ with open(os.path.join(os.path.dirname(__file__), "VERSION.txt")) as f:
 
 
 __all__ = [
-    # "Movie",
-    # "RetroEmulator",
-    # "Actions",
-    # "State",
-    # "Observations",
-    # "get_core_path",
     "SDLEnv",
     "MainDiscretizer",
     "make",
-    # "RetroEnv",
 ]
 
 
-# TODO create
-def make():
+def make(game,  **kwargs):
     """
     Create a Gym environment for the specified game
     """
-    print("TODO create make() function ")
+    return SDLEnv(game, **kwargs)
 
 

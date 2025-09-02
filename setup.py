@@ -16,7 +16,7 @@ README = open(os.path.join(SCRIPT_DIR, "README.md")).read()
 
 
 setup(
-    name="sdlarch-rl",
+    name="sdlarchrl",
     long_description=README,
     long_description_content_type="text/markdown",
     author="Paulo Sérgio",

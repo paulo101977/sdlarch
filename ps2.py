@@ -7,18 +7,28 @@ import os
 import zlib
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import SubprocVecEnv, VecTransposeImage
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecTransposeImage, DummyVecEnv
 from sdlarch_rl.sdlenv import SDLEnv
+from sdlarch_rl import make 
+from sdlarch_rl.utils.discretizer import MainDiscretizer
 
+env = SDLEnv("GranTurismo3-Ps2")
 
-# env = PCSX2Core("GranTurismo3-Ps2")
-
-# obs, info = env.reset()
+obs, info = env.reset()
 
 if __name__ == "__main__":
     def make_env():
         def _init():
-            env = SDLEnv("GranTurismo3-Ps2", render_mode="rgb_array")
+            env = SDLEnv("GranTurismo3-Ps2", render_mode="human")
+            env = MainDiscretizer(env, combos=[
+                ["LEFT"],
+                ["RIGHT"],
+                ["B"],
+                ["LEFT", "B"],
+                ["RIGHT", "B"],
+                ["Y"],
+
+            ])
             return env
         return _init
 
@@ -27,7 +37,7 @@ if __name__ == "__main__":
     model = PPO('CnnPolicy', 
     # model = RecurrentPPO('CnnLstmPolicy',
         env, 
-        verbose=1, 
+        verbose=1,
         # policy_kwargs=policy_kwargs, 
     )
 

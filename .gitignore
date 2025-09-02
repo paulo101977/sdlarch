@@ -22,3 +22,4 @@ third-party/
 *.a
 **/__pycache__/*
 sdlarch_rl/roms/**/rom.*
+*.egg-info

@@ -9,6 +9,7 @@ import importlib.util as import_util
 import gc
 from _retro import RetroEmulator
 import ctypes
+import gzip
 
 class SDLEnv(gym.Env):
     """
@@ -45,6 +46,7 @@ class SDLEnv(gym.Env):
         if not os.path.isfile(core):
             raise FileNotFoundError(f"Core file not found: {core}. Please ensure the path is correct.")
         
+        self.gamename = gamename
 
         if not os.path.exists(os.path.join(self.dirname, r"roms", f"{gamename}")):
             raise FileNotFoundError(
@@ -67,8 +69,6 @@ class SDLEnv(gym.Env):
             pcsx2_button = json.load(f)
 
         self.buttons = pcsx2_button['buttons']
-
-        # TODO: load initial state if exists
 
         meta_path = os.path.join(self.dirname, r"roms", f"{gamename}", f"meta.json")
 
@@ -106,6 +106,26 @@ class SDLEnv(gym.Env):
 
         self.render_mode = render_mode
 
+        self.initial_state = None
+        self.load_state()
+
+    def load_state(self, statename="default.state"):
+        if not statename.endswith(".state"):
+            statename += ".state"
+
+        state_path = os.path.join(self.dirname, r"roms", f"{self.gamename}", statename)
+        if not os.path.isfile(state_path):
+            raise FileNotFoundError(f"Meta file not found: {state_path}. Please ensure the path is correct.")
+        
+
+        with gzip.open(
+            state_path,
+            "rb",
+        ) as fh:
+            self.initial_state = fh.read()
+
+        print("length of state:", len(self.initial_state))
+
     def reset(self, seed=None, options=None) -> tuple[np.ndarray, dict]:
         """
         Reset the controller and ensure the PCSX2 emulator is started.
@@ -114,12 +134,21 @@ class SDLEnv(gym.Env):
 
         super().reset(seed=seed, options=options)
 
-        self.em.reset()
+        time.sleep(0.3)
+
+        if self.initial_state:
+            self.em.run()
+            self.em.set_state(self.initial_state)
+        else:
+            self.em.reset()
+
+        for p in range(self.players):
+            self.em.set_button_mask(np.zeros([len(self.buttons)], np.uint8), p)
+
         self.em.run()
 
         observation = self._get_observation()
 
-        # TODO: reset to a specific state
         self.count = 0
 
         self.old_info = self._memory_to_info()
@@ -198,7 +227,6 @@ class SDLEnv(gym.Env):
        
         return info
 
-    # TODO: implement render
     def render(self) -> np.ndarray | None:
         if self.render_mode == "human":
             if self.img is None:
