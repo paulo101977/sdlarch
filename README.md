@@ -31,9 +31,9 @@ nmake
 - [x] Load PCSX2 States
 - [ ] Compile cores in build
 - [ ] Tool to add games/map memory/save states, etc.
-- [ ] Load PCSX2 state from file
+- [x] Load PCSX2 state from file
 - [ ] Gymnasium compatibility
-- [ ] Load Emulator memory
+- [x] Load Emulator memory
 - [ ] Load games in the same standard as stable-retro
 - [ ] Improve performance
 - [ ] Load another cores (Dolphin, etc)
@@ -43,3 +43,4 @@ nmake
 If you are interested in our AI projects, visit our channel:
 
 [AI Brain](https://www.youtube.com/@AiBrainAi?sub_confirmation=1)
+
