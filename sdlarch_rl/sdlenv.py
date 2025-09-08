@@ -40,8 +40,13 @@ class SDLEnv(gym.Env):
         self.dirname = os.path.dirname(__file__)
 
         # TODO: get correct path to core
-        # TODO: make sure the core is built for the correct architecture
-        core = os.path.join(self.dirname, "./cores/ps2/pcsx2_libretro.so")
+        core_ext = "so"
+        if os.name == 'nt':
+            core_ext = "dll"
+        elif os.name == 'posix':
+            core_ext = "so"
+
+        core = os.path.join(self.dirname, "./cores/ps2/pcsx2_libretro." + core_ext)
 
         if not os.path.isfile(core):
             raise FileNotFoundError(f"Core file not found: {core}. Please ensure the path is correct.")
