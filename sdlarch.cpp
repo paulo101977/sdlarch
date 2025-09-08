@@ -50,6 +50,10 @@ const int N_BUTTONS = 16;
 const int MAX_PLAYERS = 2;
 static bool m_buttonMask[MAX_PLAYERS][N_BUTTONS]{};
 
+// Audio buffer; accumulated during run()
+static std::vector<int16_t> audioData;
+static retro_system_av_info avInfo = {};
+
 // log function that prints to python console
 void c_printf(const char* format, ...) {
     char buffer[256];
@@ -655,10 +659,10 @@ static void audio_deinit() {
     SDL_CloseAudioDevice(g_pcm);
 }
 
-static size_t audio_write(const int16_t *buf, unsigned frames) {
-    SDL_QueueAudio(g_pcm, buf, sizeof(*buf) * frames * 2);
-    return frames;
-}
+// static size_t audio_write(const int16_t *buf, unsigned frames) {
+//     SDL_QueueAudio(g_pcm, buf, sizeof(*buf) * frames * 2);
+//     return frames;
+// }
 
 
 static void core_log(enum retro_log_level level, const char *fmt, ...) {
@@ -1019,15 +1023,14 @@ static int16_t core_input_state(unsigned port, unsigned device, unsigned index, 
     return 0;
 }
 
-
 static void core_audio_sample(int16_t left, int16_t right) {
-	int16_t buf[2] = {left, right};
-	audio_write(buf, 1);
+    audioData.push_back(left);
+	audioData.push_back(right);
 }
 
-
 static size_t core_audio_sample_batch(const int16_t *data, size_t frames) {
-	return audio_write(data, frames);
+	audioData.insert(audioData.end(), data, &data[frames * 2]);
+	return frames;
 }
 
 
@@ -1086,7 +1089,7 @@ static void unload_game() {
 
 
 static void core_load_game(const char *filename) {
-	struct retro_system_av_info av = {0};
+	// struct retro_system_av_info av = {0};
 	struct retro_system_info system = {0};
 	struct retro_game_info info = { filename, 0 };
     
@@ -1131,10 +1134,10 @@ static void core_load_game(const char *filename) {
 	if (!g_retro.retro_load_game(&info))
 		die("The core failed to load the content.");
 
-	g_retro.retro_get_system_av_info(&av);
+	g_retro.retro_get_system_av_info(&avInfo);
     gameLoaded = true;
 
-	video_configure(&av.geometry);
+	video_configure(&avInfo.geometry);
 	// audio_init(av.timing.sample_rate);
 
     if (info.data)
@@ -1179,6 +1182,7 @@ void get_frame(uint8_t* buffer, int width, int height) {
 
 void run() {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    audioData.clear();
     g_retro.retro_run();
 }
 
@@ -1291,6 +1295,29 @@ void kill() {
 #endif
 
 struct RetroEmulator {
+    
+    double getFrameRate() { 
+        return avInfo.timing.fps; 
+    }
+
+    double getAudioRate() { 
+        return avInfo.timing.sample_rate;
+    }
+
+	int getAudioSamples() { 
+        return audioData.size() / 2; 
+    }
+	const int16_t* getAudioData() {
+        return audioData.data(); 
+    }
+
+    py::array_t<int16_t> getAudio() {
+		py::array_t<int16_t> arr(py::array::ShapeContainer{ getAudioSamples(), 2 });
+		int16_t* data = arr.mutable_data();
+		memcpy(data, getAudioData(), getAudioSamples() * 4);
+		return arr;
+	}
+
     void initCore(char *core, char *game) {
         init(core, game);
     }
@@ -1385,5 +1412,8 @@ PYBIND11_MODULE(_retro, m) {
         .def("get_shape", &RetroEmulator::getShape)
         .def("get_ram", &RetroEmulator::getRAM)
         .def("close", &RetroEmulator::closeCore)
-        .def("init", &RetroEmulator::initCore, py::arg("core"), py::arg("game"));
+        .def("init", &RetroEmulator::initCore, py::arg("core"), py::arg("game"))
+        .def("get_frame_rate", &RetroEmulator::getFrameRate)
+        .def("get_audio_rate", &RetroEmulator::getAudioRate)
+        .def("get_audio", &RetroEmulator::getAudio);
 }

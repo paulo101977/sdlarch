@@ -57,10 +57,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/paulo101977/project/sdlarch-rl
+CMAKE_SOURCE_DIR = /home/paulo101977/project/sdlarchrl
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/paulo101977/project/sdlarch-rl
+CMAKE_BINARY_DIR = /home/paulo101977/project/sdlarchrl
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -87,9 +87,9 @@ rebuild_cache/fast: rebuild_cache
 
 # The main all target
 all: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/paulo101977/project/sdlarch-rl/CMakeFiles /home/paulo101977/project/sdlarch-rl//CMakeFiles/progress.marks
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/paulo101977/project/sdlarchrl/CMakeFiles /home/paulo101977/project/sdlarchrl//CMakeFiles/progress.marks
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/paulo101977/project/sdlarch-rl/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/paulo101977/project/sdlarchrl/CMakeFiles 0
 .PHONY : all
 
 # The main clean target

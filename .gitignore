@@ -1,7 +1,6 @@
 *.o
 build/
-/sdlarch
-pcsx2/
+**/pcsx2/
 *.so
 .ipynb_checkpoints/
 .vscode/
@@ -23,3 +22,4 @@ third-party/
 **/__pycache__/*
 sdlarch_rl/roms/**/rom.*
 *.egg-info
+videos/

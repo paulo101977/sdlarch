@@ -109,10 +109,10 @@ if(WIN32)
         pybind11::module
     )
     
-    set_target_properties(pcsx2_headless PROPERTIES
-        PREFIX ""
-        SUFFIX ".dll"
-    )
+    # set_target_properties(pcsx2_headless PROPERTIES
+    #     PREFIX ""
+    #     SUFFIX ".dll"
+    # )
     
     set_target_properties(_retro PROPERTIES
         OUTPUT_NAME "_retro"
@@ -140,10 +140,10 @@ else()
         pybind11::module
     )
     
-    set_target_properties(pcsx2_headless PROPERTIES
-        PREFIX ""
-        SUFFIX ".so"
-    )
+    # set_target_properties(pcsx2_headless PROPERTIES
+    #     PREFIX ""
+    #     SUFFIX ".so"
+    # )
     
     set_target_properties(_retro PROPERTIES
         OUTPUT_NAME "_retro"
