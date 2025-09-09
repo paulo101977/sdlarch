@@ -32,9 +32,10 @@ namespace py = pybind11;
 extern "C" {
 #endif
 
+static GLuint g_shader_program = 0;
+
 static SDL_Window *g_win = NULL;
 static SDL_GLContext g_ctx = NULL;
-static SDL_AudioDeviceID g_pcm = 0;
 static struct retro_frame_time_callback runloop_frame_time;
 static retro_usec_t runloop_frame_time_last = 0;
 static const uint8_t *g_kbd = NULL;
@@ -120,7 +121,7 @@ static const char *g_fshader_src =
 
 static map<string, const char*> s_envVariables = {
 	{ "pcsx2_enable_hw_hacks", "enabled" },
-	{ "pcsx2_renderer", "Software" },
+	// { "pcsx2_renderer", "Software" },
 	{ "pcsx2_software_clut_render", "Normal" },
 	{ "pcsx2_fastboot", "enabled" },
     { "pcsx2_blending_accuracy", "Medium" },
@@ -266,6 +267,10 @@ void ortho2d(float m[4][4], float left, float right, float bottom, float top) {
 
 
 static void init_shaders() {
+    if (g_shader_program != 0) {
+        return;
+    }
+
     GLuint vshader = compile_shader(GL_VERTEX_SHADER, 1, &g_vshader_src);
     GLuint fshader = compile_shader(GL_FRAGMENT_SHADER, 1, &g_fshader_src);
     GLuint program = glCreateProgram();
@@ -312,6 +317,8 @@ static void init_shaders() {
     glUniformMatrix4fv(g_shader.u_mvp, 1, GL_FALSE, (float*)m);
 
     glUseProgram(0);
+
+    g_shader_program = program;
 }
 
 
@@ -387,8 +394,10 @@ static void resize_cb(int w, int h) {
 
 
 static void create_window(int width, int height) {
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
+    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
     SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
@@ -418,8 +427,8 @@ static void create_window(int width, int height) {
 
     g_win = SDL_CreateWindow(
         "sdlarch", 
-        SDL_WINDOWPOS_CENTERED,
-        SDL_WINDOWPOS_CENTERED,
+        SDL_WINDOWPOS_UNDEFINED,
+        SDL_WINDOWPOS_UNDEFINED,
         width, 
         height, 
         SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN
@@ -499,6 +508,7 @@ static void video_configure(const struct retro_game_geometry *geom) {
 	g_video.pitch = geom->max_width * g_video.bpp;
 
 	glBindTexture(GL_TEXTURE_2D, g_video.tex_id);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, geom->max_width, geom->max_height);
 
 //	glPixelStorei(GL_UNPACK_ALIGNMENT, s_video.pixfmt == GL_UNSIGNED_INT_8_8_8_8_REV ? 4 : 2);
 //	glPixelStorei(GL_UNPACK_ROW_LENGTH, s_video.pitch / s_video.bpp);
@@ -553,50 +563,34 @@ static bool video_set_pixel_format(unsigned format) {
 
 
 static void video_refresh(const void *data, unsigned width, unsigned height, unsigned pitch) {
-    if ((g_video.clip_w != width || g_video.clip_h != height) && (width != 0 && height != 0)) 
-    {
-		g_video.clip_h = height;
-		g_video.clip_w = width;
-
-		refresh_vertex_data();
-	}
-
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	glBindTexture(GL_TEXTURE_2D, g_video.tex_id);
-
-	if (pitch != g_video.pitch)
-		g_video.pitch = pitch;
-
-    if (data && data != RETRO_HW_FRAME_BUFFER_VALID) {
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, g_video.pitch / g_video.bpp);
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
-						g_video.pixtype, g_video.pixfmt, data);
-	}
-
     if( width != 0 && height != 0) {
         g_retro.width = width;
         g_retro.height = height; 
     }
 
-    int w = 0, h = 0;
-    SDL_GetWindowSize(g_win, &w, &h);
-    glViewport(0, 0, w, h);
+    if ((g_video.clip_w != width || g_video.clip_h != height) && (width != 0 && height != 0)) {
+        g_video.clip_h = height;
+        g_video.clip_w = width;
+        refresh_vertex_data();
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    
+    if (data && data != RETRO_HW_FRAME_BUFFER_VALID) {
+        glBindTexture(GL_TEXTURE_2D, g_video.tex_id);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, g_video.pitch / g_video.bpp);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
+                        g_video.pixtype, g_video.pixfmt, data);
+    }
 
     glClear(GL_COLOR_BUFFER_BIT);
-
     glUseProgram(g_shader.program);
-
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, g_video.tex_id);
-
-
     glBindVertexArray(g_shader.vao);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-    glBindVertexArray(0);
-
-    glUseProgram(0);
-
-    SDL_GL_SwapWindow(g_win);
+    
+    // SDL_GL_SwapWindow(g_win);
 }
 
 static void video_deinit() {
@@ -630,41 +624,6 @@ static void video_deinit() {
 }
 
 
-static void audio_init(int frequency) {
-    SDL_AudioSpec desired;
-    SDL_AudioSpec obtained;
-
-    SDL_zero(desired);
-    SDL_zero(obtained);
-
-    desired.format = AUDIO_S16;
-    desired.freq   = frequency;
-    desired.channels = 2;
-    desired.samples = 4096;
-
-    g_pcm = SDL_OpenAudioDevice(NULL, 0, &desired, &obtained, 0);
-    if (!g_pcm)
-        die("Failed to open playback device: %s", SDL_GetError());
-
-    SDL_PauseAudioDevice(g_pcm, 0);
-
-    // Let the core know that the audio device has been initialized.
-    if (audio_callback.set_state) {
-        audio_callback.set_state(true);
-    }
-}
-
-
-static void audio_deinit() {
-    SDL_CloseAudioDevice(g_pcm);
-}
-
-// static size_t audio_write(const int16_t *buf, unsigned frames) {
-//     SDL_QueueAudio(g_pcm, buf, sizeof(*buf) * frames * 2);
-//     return frames;
-// }
-
-
 static void core_log(enum retro_log_level level, const char *fmt, ...) {
 	char buffer[4096] = {0};
 	static const char * levelstr[] = { "dbg", "inf", "wrn", "err" };
@@ -686,92 +645,6 @@ static void core_log(enum retro_log_level level, const char *fmt, ...) {
 
 static uintptr_t core_get_current_framebuffer() {
     return g_video.fbo_id;
-}
-
-/**
- * cpu_features_get_time_usec:
- *
- * Gets time in microseconds.
- *
- * Returns: time in microseconds.
- **/
-retro_time_t cpu_features_get_time_usec(void) {
-    return (retro_time_t)SDL_GetTicks() * 1000;
-}
-
-/**
- * Get the CPU Features.
- *
- * @see retro_get_cpu_features_t
- * @return uint64_t Returns a bit-mask of detected CPU features (RETRO_SIMD_*).
- */
-static uint64_t core_get_cpu_features() {
-    uint64_t cpu = 0;
-    if (SDL_HasAVX()) {
-        cpu |= RETRO_SIMD_AVX;
-    }
-    if (SDL_HasAVX2()) {
-        cpu |= RETRO_SIMD_AVX2;
-    }
-    if (SDL_HasMMX()) {
-        cpu |= RETRO_SIMD_MMX;
-    }
-    if (SDL_HasSSE()) {
-        cpu |= RETRO_SIMD_SSE;
-    }
-    if (SDL_HasSSE2()) {
-        cpu |= RETRO_SIMD_SSE2;
-    }
-    if (SDL_HasSSE3()) {
-        cpu |= RETRO_SIMD_SSE3;
-    }
-    if (SDL_HasSSE41()) {
-        cpu |= RETRO_SIMD_SSE4;
-    }
-    if (SDL_HasSSE42()) {
-        cpu |= RETRO_SIMD_SSE42;
-    }
-    return cpu;
-}
-
-/**
- * A simple counter. Usually nanoseconds, but can also be CPU cycles.
- *
- * @see retro_perf_get_counter_t
- * @return retro_perf_tick_t The current value of the high resolution counter.
- */
-static retro_perf_tick_t core_get_perf_counter() {
-    return (retro_perf_tick_t)SDL_GetPerformanceCounter();
-}
-
-/**
- * Register a performance counter.
- *
- * @see retro_perf_register_t
- */
-static void core_perf_register(struct retro_perf_counter* counter) {
-    g_retro.perf_counter_last = counter;
-    counter->registered = true;
-}
-
-/**
- * Starts a registered counter.
- *
- * @see retro_perf_start_t
- */
-static void core_perf_start(struct retro_perf_counter* counter) {
-    if (counter->registered) {
-        counter->start = core_get_perf_counter();
-    }
-}
-
-/**
- * Stops a registered counter.
- *
- * @see retro_perf_stop_t
- */
-static void core_perf_stop(struct retro_perf_counter* counter) {
-    counter->total = core_get_perf_counter() - counter->start;
 }
 
 /**
@@ -837,10 +710,10 @@ static bool core_environment(unsigned cmd, void *data) {
                 outvar->value = strdup("Software");
             }
 
-            if(!strcmp(outvar->key, "pcsx2_renderer")) {
-                free((void*)outvar->value);
-                outvar->value = strdup("Software");
-            }
+            // if(!strcmp(outvar->key, "pcsx2_renderer")) {
+            //     free((void*)outvar->value);
+            //     outvar->value = strdup("Software");
+            // }
 
             c_printf("Variable: %s = %s\n", outvar->key, outvar->value);
 
@@ -883,22 +756,11 @@ static bool core_environment(unsigned cmd, void *data) {
 		cb->log = core_log;
         return true;
 	}
-    case RETRO_ENVIRONMENT_GET_PERF_INTERFACE: {
-        // struct retro_perf_callback *perf = (struct retro_perf_callback *)data;
-        // perf->get_time_usec = cpu_features_get_time_usec;
-        // perf->get_cpu_features = core_get_cpu_features;
-        // perf->get_perf_counter = core_get_perf_counter;
-        // perf->perf_register = core_perf_register;
-        // perf->perf_start = core_perf_start;
-        // perf->perf_stop = core_perf_stop;
-        // perf->perf_log = core_perf_log;
+	case RETRO_ENVIRONMENT_GET_CAN_DUPE: {
+		bool *bval = (bool*)data;
+		*bval = true;
         return true;
     }
-	// case RETRO_ENVIRONMENT_GET_CAN_DUPE: {
-	// 	bool *bval = (bool*)data;
-	// 	*bval = true;
-    //     return true;
-    // }
 	case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: {
 		const enum retro_pixel_format *fmt = (enum retro_pixel_format *)data;
 
@@ -920,11 +782,7 @@ static bool core_environment(unsigned cmd, void *data) {
     //     // runloop_frame_time = *frame_time;
     //     return true;
     // }
-    // case RETRO_ENVIRONMENT_SET_AUDIO_CALLBACK: {
-    //     struct retro_audio_callback *audio_cb = (struct retro_audio_callback*)data;
-    //     audio_callback = *audio_cb;
-    //     return true;
-    // }
+
     case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY:
     case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY: {
         const char **dir = (const char**)data;
@@ -954,14 +812,9 @@ static bool core_environment(unsigned cmd, void *data) {
         return true;
     }
     case RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME: {
-        // g_retro.supports_no_game = *(bool*)data;
+        g_retro.supports_no_game = *(bool*)data;
         return true;
     }
-    // case RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE: {
-    //     int *value = (int*)data;
-    //     *value = 1 << 0 | 1 << 1;
-    //     return true;
-    // }
 	default:
 		core_log(RETRO_LOG_DEBUG, "Unhandled env #%u", cmd);
 		return false;
@@ -977,14 +830,6 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
 
 
 static void core_input_poll(void) {
-	// int i;
-    // g_kbd = SDL_GetKeyboardState(NULL);
-
-	// for (i = 0; g_binds[i].k || g_binds[i].rk; ++i)
-    //     g_joy[g_binds[i].rk] = g_kbd[g_binds[i].k];
-
-    // if (g_kbd[SDL_SCANCODE_ESCAPE])
-    //     running = false;
 }
 
 
@@ -1138,7 +983,6 @@ static void core_load_game(const char *filename) {
     gameLoaded = true;
 
 	video_configure(&avInfo.geometry);
-	// audio_init(av.timing.sample_rate);
 
     if (info.data)
         SDL_free((void*)info.data);
@@ -1175,13 +1019,29 @@ bool load_state(const void* data, size_t size) {
 
 void get_frame(uint8_t* buffer, int width, int height) {
     SDL_GL_MakeCurrent(g_win, g_ctx);
-
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, buffer);
+    
+    static GLuint pbo = 0;
+    if (pbo == 0) {
+        glGenBuffers(1, &pbo);
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
+        glBufferData(GL_PIXEL_PACK_BUFFER, width * height * 3, NULL, GL_STREAM_READ);
+    }
+    
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
+    glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, 0);
+    
+    GLubyte* ptr = (GLubyte*)glMapBuffer(GL_PIXEL_PACK_BUFFER, GL_READ_ONLY);
+    if (ptr) {
+        memcpy(buffer, ptr, width * height * 3);
+        glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+    }
+    
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
 }
 
 void run() {
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    // glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    SDL_GL_MakeCurrent(g_win, g_ctx);
     audioData.clear();
     g_retro.retro_run();
 }
@@ -1203,6 +1063,11 @@ void init(char *core, char *game) {
         die("Failed to initialize SDL");
     }
 
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
+    SDL_SetHint(SDL_HINT_RENDER_OPENGL_SHADERS, "1");
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0"); // Nearest neighbor
+    SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
+
     g_video.hw.version_major = 4;
     g_video.hw.version_minor = 5;
     g_video.hw.context_type  = RETRO_HW_CONTEXT_OPENGLES3;
@@ -1222,61 +1087,10 @@ void init(char *core, char *game) {
     // g_retro.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
     g_retro.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
     g_retro.retro_set_controller_port_device(1, RETRO_DEVICE_JOYPAD);
-
-    // SDL_Event ev;
-
-    // while (running) {
-    //     // Update the game loop timer.
-    //     if (runloop_frame_time.callback) {
-    //         retro_time_t current = cpu_features_get_time_usec();
-    //         retro_time_t delta = current - runloop_frame_time_last;
-
-    //         if (!runloop_frame_time_last)
-    //             delta = runloop_frame_time.reference;
-    //         runloop_frame_time_last = current;
-    //         runloop_frame_time.callback(delta);
-    //     }
-
-    //     // Ask the core to emit the audio.
-    //     if (audio_callback.callback) {
-    //         audio_callback.callback();
-    //     }
-
-    //     while (SDL_PollEvent(&ev)) {
-    //         switch (ev.type) {
-    //         case SDL_QUIT: running = false; break;
-    //         case SDL_WINDOWEVENT:
-    //             switch (ev.window.event) {
-    //             case SDL_WINDOWEVENT_CLOSE: running = false; break;
-    //             case SDL_WINDOWEVENT_RESIZED:
-    //                 resize_cb(ev.window.data1, ev.window.data2);
-    //                 break;
-    //             }
-    //         }
-    //     }
-
-    //     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	// 	g_retro.retro_run();
-	// }
-
-	// core_unload();
-	// audio_deinit();
-	// video_deinit();
-
-    // if (g_vars) {
-    //     for (const struct retro_variable *v = g_vars; v->key; ++v) {
-    //         free((char*)v->key);
-    //         free((char*)v->value);
-    //     }
-    //     free(g_vars);
-    // }
-
-    // SDL_Quit();
 }
 
 void kill() {
     core_unload();
-	// audio_deinit();
 	video_deinit();
 
     if (g_vars) {
