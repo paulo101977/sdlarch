@@ -27,6 +27,7 @@ nmake
 
 ## TODO
 
+- [ ] Run Dolphin Core
 - [x] Run PCSX2 Core
 - [x] Load PCSX2 States
 - [ ] Compile cores in build
@@ -43,4 +44,5 @@ nmake
 If you are interested in our AI projects, visit our channel:
 
 [AI Brain](https://www.youtube.com/@AiBrainAi?sub_confirmation=1)
+
 
