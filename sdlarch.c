@@ -11,7 +11,7 @@ static retro_usec_t runloop_frame_time_last = 0;
 static const uint8_t *g_kbd = NULL;
 static struct retro_audio_callback audio_callback;
 
-static float g_scale = 3;
+static float g_scale = 1;
 bool running = true;
 
 static struct {
@@ -227,10 +227,10 @@ static void init_shaders() {
 
 
 static void refresh_vertex_data() {
-    SDL_assert(g_video.tex_w);
-    SDL_assert(g_video.tex_h);
-    SDL_assert(g_video.clip_w);
-    SDL_assert(g_video.clip_h);
+    // SDL_assert(g_video.tex_w);
+    // SDL_assert(g_video.tex_h);
+    // SDL_assert(g_video.clip_w);
+    // SDL_assert(g_video.clip_h);
 
     float bottom = (float)g_video.clip_h / g_video.tex_h;
     float right  = (float)g_video.clip_w / g_video.tex_w;
@@ -381,6 +381,8 @@ static void video_configure(const struct retro_game_geometry *geom) {
 
 	if (!g_win)
 		create_window(nwidth, nheight);
+    else
+        SDL_GL_MakeCurrent(g_win, g_ctx);
 
 	if (g_video.tex_id)
 		glDeleteTextures(1, &g_video.tex_id);
@@ -421,7 +423,9 @@ static void video_configure(const struct retro_game_geometry *geom) {
 
 	refresh_vertex_data();
 
-    g_video.hw.context_reset();
+    if (g_video.hw.context_reset) {
+        g_video.hw.context_reset();
+    }
 }
 
 
@@ -983,6 +987,15 @@ int main(int argc, char *argv[]) {
     g_video.hw.context_reset   = noop;
     g_video.hw.context_destroy = noop;
 
+    // Create a temporary context to load glad and print the GL version.
+    SDL_Window* temp_win = SDL_CreateWindow("Temp", 0, 0, 1, 1, 
+                                          SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
+    SDL_GLContext temp_ctx = SDL_GL_CreateContext(temp_win);
+    SDL_GL_MakeCurrent(temp_win, temp_ctx);
+    
+    gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress);
+    printf("Temporary GL Context: %s\n", glGetString(GL_VERSION));
+
     // Load the core.
     core_load(argv[1]);
 
@@ -994,6 +1007,9 @@ int main(int argc, char *argv[]) {
 
     // Configure the player input devices.
     g_retro.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
+
+    SDL_GL_DeleteContext(temp_ctx);
+    SDL_DestroyWindow(temp_win);
 
     SDL_Event ev;
 
