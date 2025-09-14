@@ -13,6 +13,7 @@ static struct retro_audio_callback audio_callback;
 
 static float g_scale = 1;
 bool running = true;
+static GLuint g_shader_program = 0;
 
 static struct {
 	GLuint tex_id;
@@ -104,6 +105,82 @@ struct keymap {
 	unsigned rk;
 };
 
+struct EnvVariable {
+    const char* key;
+    const char* value;
+};
+
+struct EnvVariable s_envVariables[] = {
+	{ "pcsx2_enable_hw_hacks", "enabled" },
+	{ "pcsx2_renderer", "Software" },
+	{ "pcsx2_software_clut_render", "Normal" },
+	{ "pcsx2_fastboot", "enabled" },
+    { "pcsx2_blending_accuracy", "Medium" },
+	{ "pcsx2_pgs_ssaa", "Native" },
+	{ "pcsx2_pgs_ss_tex", "disabled" },
+	{ "pcsx2_pgs_deblur", "disabled" },
+	{ "pcsx2_pgs_high_res_scanout", "disabled" },
+	{ "pcsx2_pgs_disable_mipmaps", "disabled" },
+	{ "pcsx2_nointerlacing_hint", "disabled" },
+	{ "pcsx2_pcrtc_antiblur", "disabled" },
+	{ "pcsx2_pcrtc_screen_offsets", "disabled" },
+	{ "pcsx2_disable_interlace_offset", "disabled" },
+	{ "pcsx2_deinterlace_mode", "Automatic" },
+	{ "pcsx2_enable_cheats", "disabled" },
+	{ "pcsx2_hint_language_unlock", "disabled" },
+	{ "pcsx2_ee_cycle_rate", "100% (Normal Speed)" },
+	{ "pcsx2_widescreen_hint", "disabled" },
+	{ "pcsx2_uncapped_framerate_hint", "disabled" },
+	{ "pcsx2_game_enhancements_hint", "disabled" },
+	{ "pcsx2_ee_cycle_skip", "disabled" },
+	{ "pcsx2_axis_scale1", "133%" },
+	{ "pcsx2_axis_deadzone1", "0%" },
+	{ "pcsx2_button_deadzone1", "0%" },
+    { "pcsx2_button_deadzone2", "0%" },
+	{ "pcsx2_enable_rumble1", "disabled" },
+    { "pcsx2_enable_rumble2", "disabled" },
+	{ "pcsx2_invert_left_stick1", "disabled" },
+	{ "pcsx2_invert_right_stick1", "disabled" },
+	{ "pcsx2_axis_scale2", "133%" },
+	{ "pcsx2_axis_deadzone2", "15%" },
+	{ "pcsx2_button_deadzone2", "0%" },
+	{ "pcsx2_invert_left_stick2", "disabled" },
+	{ "pcsx2_invert_right_stick2", "disabled" },
+	{ "dolphin_efb_scale", "x1 (640 x 528)" },
+	{ "dolphin_log_level", "Info" },
+	{ "dolphin_cpu_clock_rate", "100%" },
+    { "dolphin_enable_rumble", "disabled" },
+	// { "dolphin_renderer", "Software" },
+	// { "dolphin_fastmem", "disabled" },
+	// { "dolphin_dsp_hle", "enabled" },
+	// { "dolphin_dsp_jit", "enabled" },
+	// { "dolphin_cpu_core", "JIT64" },
+	// { "dolphin_language", "English" },
+	// { "dolphin_widescreen", "disabled" },
+	// { "dolphin_widescreen_hack", "disabled" },
+	// { "dolphin_progressive_scan", "disabled" },
+	// { "dolphin_pal60", "disabled" },
+	// { "dolphin_sensor_bar_position", "Bottom" },
+	// { "dolphin_wiimote_continuous_scanning", "disabled" },
+	// { "dolphin_mixer_rate", "32000" },
+	{ "dolphin_shader_compilation_mode", "sync" },
+	{ "dolphin_max_anisotropy", "0" },
+	{ "dolphin_efb_scaled_copy", "enabled" },
+	{ "dolphin_efb_to_texture", "enabled" },
+	{ "dolphin_efb_to_vram", "enabled" },
+	{ "dolphin_fast_depth_calculation", "disabled" },
+	{ "dolphin_bbox_enabled", "disabled" },
+	{ "dolphin_gpu_texture_decoding", "enabled" },
+	{ "dolphin_wait_for_shaders", "disabled" },
+	{ "dolphin_force_texture_filtering", "disabled" },
+	{ "dolphin_load_custom_textures", "disabled" },
+	{ "dolphin_cheats_enabled", "disabled" },
+	{ "dolphin_texture_cache_accuracy", "disabled" },
+	{ "dolphin_osd_enabled", "disabled" },
+    {NULL, NULL},
+};
+
+
 static struct keymap g_binds[] = {
     { SDL_SCANCODE_X, RETRO_DEVICE_ID_JOYPAD_A },
     { SDL_SCANCODE_Z, RETRO_DEVICE_ID_JOYPAD_B },
@@ -177,6 +254,10 @@ void ortho2d(float m[4][4], float left, float right, float bottom, float top) {
 
 
 static void init_shaders() {
+    if (g_shader_program != 0) {
+        return;
+    }
+
     GLuint vshader = compile_shader(GL_VERTEX_SHADER, 1, &g_vshader_src);
     GLuint fshader = compile_shader(GL_FRAGMENT_SHADER, 1, &g_fshader_src);
     GLuint program = glCreateProgram();
@@ -223,14 +304,16 @@ static void init_shaders() {
     glUniformMatrix4fv(g_shader.u_mvp, 1, GL_FALSE, (float*)m);
 
     glUseProgram(0);
+
+    g_shader_program = program;
 }
 
 
 static void refresh_vertex_data() {
-    // SDL_assert(g_video.tex_w);
-    // SDL_assert(g_video.tex_h);
-    // SDL_assert(g_video.clip_w);
-    // SDL_assert(g_video.clip_h);
+    SDL_assert(g_video.tex_w);
+    SDL_assert(g_video.tex_h);
+    SDL_assert(g_video.clip_w);
+    SDL_assert(g_video.clip_h);
 
     float bottom = (float)g_video.clip_h / g_video.tex_h;
     float right  = (float)g_video.clip_w / g_video.tex_w;
@@ -298,6 +381,10 @@ static void resize_cb(int w, int h) {
 
 
 static void create_window(int width, int height) {
+    SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
+    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
     SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
@@ -320,6 +407,7 @@ static void create_window(int width, int height) {
         if (g_video.hw.version_major >= 3)
             SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
         break;
+    
     default:
         die("Unsupported hw context %i. (only OPENGL, OPENGL_CORE and OPENGLES2 supported)", g_video.hw.context_type);
     }
@@ -350,7 +438,7 @@ static void create_window(int width, int height) {
 
     init_shaders();
 
-    SDL_GL_SetSwapInterval(1);
+    SDL_GL_SetSwapInterval(0); // disable vsync
     SDL_GL_SwapWindow(g_win); // make apitrace output nicer
 
     resize_cb(width, height);
@@ -374,6 +462,14 @@ static void resize_to_aspect(double ratio, int sw, int sh, int *dw, int *dh) {
 static void video_configure(const struct retro_game_geometry *geom) {
 	int nwidth, nheight;
 
+    printf("Video configure - current context: %p\n", SDL_GL_GetCurrentContext());
+    
+    // Garante que o contexto está ativo
+    if (g_win && g_ctx) {
+        SDL_GL_MakeCurrent(g_win, g_ctx);
+        printf("Context activated for video: %p\n", SDL_GL_GetCurrentContext());
+    }
+
 	resize_to_aspect(geom->aspect_ratio, geom->base_width * 1, geom->base_height * 1, &nwidth, &nheight);
 
 	nwidth *= g_scale;
@@ -381,8 +477,6 @@ static void video_configure(const struct retro_game_geometry *geom) {
 
 	if (!g_win)
 		create_window(nwidth, nheight);
-    else
-        SDL_GL_MakeCurrent(g_win, g_ctx);
 
 	if (g_video.tex_id)
 		glDeleteTextures(1, &g_video.tex_id);
@@ -402,6 +496,7 @@ static void video_configure(const struct retro_game_geometry *geom) {
 	g_video.pitch = geom->max_width * g_video.bpp;
 
 	glBindTexture(GL_TEXTURE_2D, g_video.tex_id);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, geom->max_width, geom->max_height);
 
 //	glPixelStorei(GL_UNPACK_ALIGNMENT, s_video.pixfmt == GL_UNSIGNED_INT_8_8_8_8_REV ? 4 : 2);
 //	glPixelStorei(GL_UNPACK_ROW_LENGTH, s_video.pitch / s_video.bpp);
@@ -423,9 +518,7 @@ static void video_configure(const struct retro_game_geometry *geom) {
 
 	refresh_vertex_data();
 
-    if (g_video.hw.context_reset) {
-        g_video.hw.context_reset();
-    }
+    g_video.hw.context_reset();
 }
 
 
@@ -455,45 +548,34 @@ static bool video_set_pixel_format(unsigned format) {
 
 
 static void video_refresh(const void *data, unsigned width, unsigned height, unsigned pitch) {
-    if (g_video.clip_w != width || g_video.clip_h != height)
-    {
-		g_video.clip_h = height;
-		g_video.clip_w = width;
+    // if( width != 0 && height != 0) {
+    //     g_retro.width = width;
+    //     g_retro.height = height; 
+    // }
 
-		refresh_vertex_data();
-	}
+    if ((g_video.clip_w != width || g_video.clip_h != height) && (width != 0 && height != 0)) {
+        g_video.clip_h = height;
+        g_video.clip_w = width;
+        refresh_vertex_data();
+    }
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	glBindTexture(GL_TEXTURE_2D, g_video.tex_id);
-
-	if (pitch != g_video.pitch)
-		g_video.pitch = pitch;
-
+    
     if (data && data != RETRO_HW_FRAME_BUFFER_VALID) {
+        glBindTexture(GL_TEXTURE_2D, g_video.tex_id);
         glPixelStorei(GL_UNPACK_ROW_LENGTH, g_video.pitch / g_video.bpp);
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
-						g_video.pixtype, g_video.pixfmt, data);
-	}
-
-    int w = 0, h = 0;
-    SDL_GetWindowSize(g_win, &w, &h);
-    glViewport(0, 0, w, h);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
+                        g_video.pixtype, g_video.pixfmt, data);
+    }
 
     glClear(GL_COLOR_BUFFER_BIT);
-
     glUseProgram(g_shader.program);
-
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, g_video.tex_id);
-
-
     glBindVertexArray(g_shader.vao);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-    glBindVertexArray(0);
-
-    glUseProgram(0);
-
-    SDL_GL_SwapWindow(g_win);
+    
+    // SDL_GL_SwapWindow(g_win);
 }
 
 static void video_deinit() {
@@ -681,8 +763,29 @@ static void core_perf_log() {
     core_log(RETRO_LOG_INFO, "[timer] %s: %i - %i", g_retro.perf_counter_last->ident, g_retro.perf_counter_last->start, g_retro.perf_counter_last->total);
 }
 
+static int key_exists(const char* key) {
+    for (int i = 0; s_envVariables[i].key != NULL; i++) {
+        if (strcmp(s_envVariables[i].key, key) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static bool core_environment(unsigned cmd, void *data) {
 	switch (cmd) {
+    case RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE:
+        return false;
+    case RETRO_ENVIRONMENT_GET_INPUT_DEVICE_CAPABILITIES: {
+        uint64_t* caps = (uint64_t*)data;
+        *caps = (1 << RETRO_DEVICE_JOYPAD);
+        return true;
+    }
+
+    // case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS: {
+    //     return true;
+    // }
+
     case RETRO_ENVIRONMENT_SET_VARIABLES: {
         const struct retro_variable *vars = (const struct retro_variable *)data;
         size_t num_vars = 0;
@@ -713,6 +816,33 @@ static bool core_environment(unsigned cmd, void *data) {
             }
 
             outvar->key = strdup(invar->key);
+
+            // if(!strcmp(outvar->key, "dolphin_renderer")) {
+            //     free(outvar->value);
+            //     outvar->value = strdup("Software");
+            // }
+
+            // pcsx2_enable_rumble
+            if(!strcmp(outvar->key, "pcsx2_enable_rumble1")) {
+                free(outvar->value);
+                outvar->value = strdup("disabled");
+            }
+            if(!strcmp(outvar->key, "pcsx2_button_deadzone1")) {
+                free(outvar->value);
+                outvar->value = strdup("0%");
+            }
+
+            if (key_exists(outvar->key)) {
+                for (int i = 0; s_envVariables[i].key != NULL; i++) {
+                    if (strcmp(s_envVariables[i].key, outvar->key) == 0) {
+                        outvar->value = strdup(s_envVariables[i].value);
+                        break;
+                    }
+                }
+            }
+
+            printf("Variable: %s = %s\n", outvar->key, outvar->value);
+
             SDL_assert(outvar->key && outvar->value);
         }
 
@@ -725,6 +855,12 @@ static bool core_environment(unsigned cmd, void *data) {
             return false;
 
         for (const struct retro_variable *v = g_vars; v->key; ++v) {
+            // if(!strcmp(var->key, "dolphin_renderer")) {
+            //     free(var->value);
+            //     var->value = strdup("Software");
+            //     break;
+            // }
+
             if (strcmp(var->key, v->key) == 0) {
                 var->value = v->value;
                 break;
@@ -788,13 +924,15 @@ static bool core_environment(unsigned cmd, void *data) {
     case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY:
     case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY: {
         const char **dir = (const char**)data;
-        *dir = ".";
+        *dir = "./system";
         return true;
     }
     case RETRO_ENVIRONMENT_SET_GEOMETRY: {
         const struct retro_game_geometry *geom = (const struct retro_game_geometry *)data;
         g_video.clip_w = geom->base_width;
         g_video.clip_h = geom->base_height;
+
+        printf("Set geometry: ----->>>> %u %u %u %u\n", geom->base_width, geom->base_height, geom->max_width, geom->max_height);
 
         // some cores call this before we even have a window
         if (g_win) {
@@ -803,8 +941,8 @@ static bool core_environment(unsigned cmd, void *data) {
             int ow = 0, oh = 0;
             resize_to_aspect(geom->aspect_ratio, geom->base_width, geom->base_height, &ow, &oh);
 
-            ow *= g_scale;
-            oh *= g_scale;
+            // ow *= g_scale;
+            // oh *= g_scale;
 
             SDL_SetWindowSize(g_win, ow, oh);
         }
@@ -820,6 +958,7 @@ static bool core_environment(unsigned cmd, void *data) {
         return true;
     }
 	default:
+        // printf("Unhandled env #%u \n", cmd);
 		core_log(RETRO_LOG_DEBUG, "Unhandled env #%u", cmd);
 		return false;
 	}
@@ -846,10 +985,28 @@ static void core_input_poll(void) {
 
 
 static int16_t core_input_state(unsigned port, unsigned device, unsigned index, unsigned id) {
-	if (port || index || device != RETRO_DEVICE_JOYPAD)
-		return 0;
+    if (port >= 1) return 0;
 
-	return g_joy[id];
+    if (index == RETRO_DEVICE_INDEX_ANALOG_BUTTON && device == RETRO_DEVICE_ANALOG) {
+        int16_t value = g_joy[id] ? 32767 : 0;
+        return value;
+    }
+
+    if (device == RETRO_DEVICE_JOYPAD && id == RETRO_DEVICE_ID_JOYPAD_MASK) {
+        uint32_t mask = 0;
+        for (int i = 0; i < 16; i++) {
+            if (g_joy[i]) {
+                mask |= (1 << i);
+            }
+        }
+        return mask;
+    }
+
+    if (device == RETRO_DEVICE_JOYPAD && id < 16) {
+        return g_joy[id] ? 1 : 0;
+    }
+
+    return 0;
 }
 
 
@@ -980,6 +1137,14 @@ int main(int argc, char *argv[]) {
 
     if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO|SDL_INIT_EVENTS) < 0)
         die("Failed to initialize SDL");
+
+    system("rm -rf ./system/User");
+    // system("rm -f ./*[^[:print:]]* 2>/dev/null");
+
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
+    SDL_SetHint(SDL_HINT_RENDER_OPENGL_SHADERS, "1");
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0"); // Nearest neighbor
+    SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
 
     g_video.hw.version_major = 4;
     g_video.hw.version_minor = 5;
