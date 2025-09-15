@@ -1,4 +1,3 @@
-
 #include <SDL.h>
 #include "libretro.h"
 #include "glad.h"
@@ -11,9 +10,11 @@ static retro_usec_t runloop_frame_time_last = 0;
 static const uint8_t *g_kbd = NULL;
 static struct retro_audio_callback audio_callback;
 
-static float g_scale = 1;
-bool running = true;
 static GLuint g_shader_program = 0;
+
+
+static float g_scale = 3;
+bool running = true;
 
 static struct {
 	GLuint tex_id;
@@ -164,22 +165,21 @@ struct EnvVariable s_envVariables[] = {
 	// { "dolphin_wiimote_continuous_scanning", "disabled" },
 	// { "dolphin_mixer_rate", "32000" },
 	{ "dolphin_shader_compilation_mode", "sync" },
-	{ "dolphin_max_anisotropy", "0" },
+	// { "dolphin_max_anisotropy", "0" },
 	{ "dolphin_efb_scaled_copy", "enabled" },
 	{ "dolphin_efb_to_texture", "enabled" },
-	{ "dolphin_efb_to_vram", "enabled" },
-	{ "dolphin_fast_depth_calculation", "disabled" },
-	{ "dolphin_bbox_enabled", "disabled" },
-	{ "dolphin_gpu_texture_decoding", "enabled" },
+	// { "dolphin_efb_to_vram", "disabled" },
+	// { "dolphin_fast_depth_calculation", "disabled" },
+	// { "dolphin_bbox_enabled", "disabled" },
+	// { "dolphin_gpu_texture_decoding", "disabled" },
 	{ "dolphin_wait_for_shaders", "disabled" },
-	{ "dolphin_force_texture_filtering", "disabled" },
-	{ "dolphin_load_custom_textures", "disabled" },
-	{ "dolphin_cheats_enabled", "disabled" },
-	{ "dolphin_texture_cache_accuracy", "disabled" },
+	// { "dolphin_force_texture_filtering", "disabled" },
+	// { "dolphin_load_custom_textures", "disabled" },
+	// { "dolphin_cheats_enabled", "disabled" },
+	// { "dolphin_texture_cache_accuracy", "disabled" },
 	{ "dolphin_osd_enabled", "disabled" },
     {NULL, NULL},
 };
-
 
 static struct keymap g_binds[] = {
     { SDL_SCANCODE_X, RETRO_DEVICE_ID_JOYPAD_A },
@@ -407,7 +407,6 @@ static void create_window(int width, int height) {
         if (g_video.hw.version_major >= 3)
             SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
         break;
-    
     default:
         die("Unsupported hw context %i. (only OPENGL, OPENGL_CORE and OPENGLES2 supported)", g_video.hw.context_type);
     }
@@ -438,10 +437,15 @@ static void create_window(int width, int height) {
 
     init_shaders();
 
-    SDL_GL_SetSwapInterval(0); // disable vsync
+    SDL_GL_SetSwapInterval(1);
     SDL_GL_SwapWindow(g_win); // make apitrace output nicer
 
     resize_cb(width, height);
+
+    // TODO: make the same in sdlarch-rl
+    if (g_video.hw.context_reset) {
+        g_video.hw.context_reset();
+    }
 }
 
 
@@ -462,18 +466,12 @@ static void resize_to_aspect(double ratio, int sw, int sh, int *dw, int *dh) {
 static void video_configure(const struct retro_game_geometry *geom) {
 	int nwidth, nheight;
 
-    printf("Video configure - current context: %p\n", SDL_GL_GetCurrentContext());
-    
-    // Garante que o contexto está ativo
-    if (g_win && g_ctx) {
-        SDL_GL_MakeCurrent(g_win, g_ctx);
-        printf("Context activated for video: %p\n", SDL_GL_GetCurrentContext());
-    }
-
 	resize_to_aspect(geom->aspect_ratio, geom->base_width * 1, geom->base_height * 1, &nwidth, &nheight);
 
-	nwidth *= g_scale;
-	nheight *= g_scale;
+	// nwidth *= g_scale;
+	// nheight *= g_scale;
+    // nwidth *= g_scale;
+	// nheight *= g_scale;
 
 	if (!g_win)
 		create_window(nwidth, nheight);
@@ -496,7 +494,10 @@ static void video_configure(const struct retro_game_geometry *geom) {
 	g_video.pitch = geom->max_width * g_video.bpp;
 
 	glBindTexture(GL_TEXTURE_2D, g_video.tex_id);
-    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, geom->max_width, geom->max_height);
+    // glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, geom->max_width, geom->max_height);
+    // TODO: make the same in sdlarch-rl
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, geom->max_width, geom->max_height, 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
 //	glPixelStorei(GL_UNPACK_ALIGNMENT, s_video.pixfmt == GL_UNSIGNED_INT_8_8_8_8_REV ? 4 : 2);
 //	glPixelStorei(GL_UNPACK_ROW_LENGTH, s_video.pitch / s_video.bpp);
@@ -518,7 +519,10 @@ static void video_configure(const struct retro_game_geometry *geom) {
 
 	refresh_vertex_data();
 
-    g_video.hw.context_reset();
+    // TODO: make the same in sdlarch-rl
+    if (g_video.hw.context_reset) {
+        g_video.hw.context_reset();
+    }
 }
 
 
@@ -548,11 +552,8 @@ static bool video_set_pixel_format(unsigned format) {
 
 
 static void video_refresh(const void *data, unsigned width, unsigned height, unsigned pitch) {
-    // if( width != 0 && height != 0) {
-    //     g_retro.width = width;
-    //     g_retro.height = height; 
-    // }
 
+    // TODO: make the same in sdlarch-rl
     if ((g_video.clip_w != width || g_video.clip_h != height) && (width != 0 && height != 0)) {
         g_video.clip_h = height;
         g_video.clip_w = width;
@@ -560,22 +561,28 @@ static void video_refresh(const void *data, unsigned width, unsigned height, uns
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    
-    if (data && data != RETRO_HW_FRAME_BUFFER_VALID) {
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    if (data == RETRO_HW_FRAME_BUFFER_VALID) {
+        // Hardware rendering
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, g_video.hw.get_current_framebuffer());
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    } else if (data && data != RETRO_HW_FRAME_BUFFER_VALID) {
+        // Software rendering
         glBindTexture(GL_TEXTURE_2D, g_video.tex_id);
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, g_video.pitch / g_video.bpp);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, pitch / g_video.bpp);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
                         g_video.pixtype, g_video.pixfmt, data);
+
+        glUseProgram(g_shader.program);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, g_video.tex_id);
+        glBindVertexArray(g_shader.vao);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
 
-    glClear(GL_COLOR_BUFFER_BIT);
-    glUseProgram(g_shader.program);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, g_video.tex_id);
-    glBindVertexArray(g_shader.vao);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-    
-    // SDL_GL_SwapWindow(g_win);
+    SDL_GL_SwapWindow(g_win);
 }
 
 static void video_deinit() {
@@ -1010,6 +1017,7 @@ static int16_t core_input_state(unsigned port, unsigned device, unsigned index, 
 }
 
 
+
 static void core_audio_sample(int16_t left, int16_t right) {
 	int16_t buf[2] = {left, right};
 	audio_write(buf, 1);
@@ -1138,28 +1146,19 @@ int main(int argc, char *argv[]) {
     if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO|SDL_INIT_EVENTS) < 0)
         die("Failed to initialize SDL");
 
-    system("rm -rf ./system/User");
-    // system("rm -f ./*[^[:print:]]* 2>/dev/null");
-
     SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
     SDL_SetHint(SDL_HINT_RENDER_OPENGL_SHADERS, "1");
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0"); // Nearest neighbor
     SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
 
+    system("rm -rf ./system/User");
+
     g_video.hw.version_major = 4;
     g_video.hw.version_minor = 5;
     g_video.hw.context_type  = RETRO_HW_CONTEXT_OPENGL_CORE;
+    // g_video.hw.context_type = RETRO_HW_CONTEXT_NONE;
     g_video.hw.context_reset   = noop;
     g_video.hw.context_destroy = noop;
-
-    // Create a temporary context to load glad and print the GL version.
-    SDL_Window* temp_win = SDL_CreateWindow("Temp", 0, 0, 1, 1, 
-                                          SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
-    SDL_GLContext temp_ctx = SDL_GL_CreateContext(temp_win);
-    SDL_GL_MakeCurrent(temp_win, temp_ctx);
-    
-    gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress);
-    printf("Temporary GL Context: %s\n", glGetString(GL_VERSION));
 
     // Load the core.
     core_load(argv[1]);
@@ -1172,9 +1171,7 @@ int main(int argc, char *argv[]) {
 
     // Configure the player input devices.
     g_retro.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
-
-    SDL_GL_DeleteContext(temp_ctx);
-    SDL_DestroyWindow(temp_win);
+    // g_retro.retro_set_controller_port_device(0, RETRO_DEVICE_KEYBOARD);
 
     SDL_Event ev;
 
@@ -1208,7 +1205,8 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        SDL_GL_MakeCurrent(g_win, g_ctx);
+        // glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		g_retro.retro_run();
 	}
 
