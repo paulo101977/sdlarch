@@ -1,6 +1,8 @@
 #include <SDL.h>
 #include "libretro.h"
 #include "glad.h"
+#include <stdio.h>
+#include <stdlib.h>
 
 static SDL_Window *g_win = NULL;
 static SDL_GLContext *g_ctx = NULL;
@@ -12,6 +14,11 @@ static struct retro_audio_callback audio_callback;
 
 static GLuint g_shader_program = 0;
 
+#ifdef _WIN32
+#ifdef main
+#undef main
+#endif
+#endif
 
 static float g_scale = 3;
 bool running = true;
@@ -819,30 +826,30 @@ static bool core_environment(unsigned cmd, void *data) {
                 memcpy((char*)outvar->value, semicolon, first_pipe - semicolon);
                 ((char*)outvar->value)[first_pipe - semicolon] = '\0';
             } else {
-                outvar->value = strdup(semicolon);
+                outvar->value = _strdup(semicolon);
             }
 
-            outvar->key = strdup(invar->key);
+            outvar->key = _strdup(invar->key);
 
             // if(!strcmp(outvar->key, "dolphin_renderer")) {
             //     free(outvar->value);
-            //     outvar->value = strdup("Software");
+            //     outvar->value = _strdup("Software");
             // }
 
             // pcsx2_enable_rumble
             if(!strcmp(outvar->key, "pcsx2_enable_rumble1")) {
                 free(outvar->value);
-                outvar->value = strdup("disabled");
+                outvar->value = _strdup("disabled");
             }
             if(!strcmp(outvar->key, "pcsx2_button_deadzone1")) {
                 free(outvar->value);
-                outvar->value = strdup("0%");
+                outvar->value = _strdup("0%");
             }
 
             if (key_exists(outvar->key)) {
                 for (int i = 0; s_envVariables[i].key != NULL; i++) {
                     if (strcmp(s_envVariables[i].key, outvar->key) == 0) {
-                        outvar->value = strdup(s_envVariables[i].value);
+                        outvar->value = _strdup(s_envVariables[i].value);
                         break;
                     }
                 }
@@ -864,7 +871,7 @@ static bool core_environment(unsigned cmd, void *data) {
         for (const struct retro_variable *v = g_vars; v->key; ++v) {
             // if(!strcmp(var->key, "dolphin_renderer")) {
             //     free(var->value);
-            //     var->value = strdup("Software");
+            //     var->value = _strdup("Software");
             //     break;
             // }
 
