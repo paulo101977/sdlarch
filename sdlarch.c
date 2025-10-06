@@ -4,6 +4,38 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#ifdef _WIN32
+// #include <SDL_vulkan.h>
+
+#define RETRO_HW_RENDER_INTERFACE_VULKAN_VERSION 5
+
+struct retro_hw_render_interface_vulkan {
+    struct retro_hw_render_interface interface;
+    void* instance;
+    void* physical_device;
+    void* device;
+    void* queue;
+    uint32_t queue_family_index;
+    void* (*get_instance_proc_addr)(void* instance, const char* name);
+    void* (*get_device_proc_addr)(void* device, const char* name);
+};
+
+static struct retro_hw_render_interface_vulkan g_vk_interface = {
+    .interface = {
+        .interface_type = RETRO_HW_RENDER_INTERFACE_VULKAN,
+        .interface_version = RETRO_HW_RENDER_INTERFACE_VULKAN_VERSION,
+    },
+    .instance = NULL,
+    .physical_device = NULL,
+    .device = NULL,
+    .queue = NULL,
+    .queue_family_index = 0,
+    .get_instance_proc_addr = NULL,
+    .get_device_proc_addr = NULL,
+};
+
+#endif
+
 static SDL_Window *g_win = NULL;
 static SDL_GLContext *g_ctx = NULL;
 static SDL_AudioDeviceID g_pcm = 0;
@@ -120,7 +152,7 @@ struct EnvVariable {
 
 struct EnvVariable s_envVariables[] = {
 	{ "pcsx2_enable_hw_hacks", "enabled" },
-	{ "pcsx2_renderer", "Software" },
+	{ "pcsx2_renderer", "Hardware" },
 	{ "pcsx2_software_clut_render", "Normal" },
 	{ "pcsx2_fastboot", "enabled" },
     { "pcsx2_blending_accuracy", "Medium" },
@@ -455,6 +487,22 @@ static void create_window(int width, int height) {
     }
 }
 
+
+static void create_vulkan_window(int width, int height) {
+    printf("Creating Vulkan window...\n");
+    
+    g_win = SDL_CreateWindow("sdlarch-vulkan",
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        width, height,
+        SDL_WINDOW_VULKAN | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
+    );
+    
+    if (!g_win) {
+        die("Failed to create Vulkan window: %s", SDL_GetError());
+    }
+    
+    printf("Vulkan window created successfully\n");
+}
 
 static void resize_to_aspect(double ratio, int sw, int sh, int *dw, int *dh) {
 	*dw = sw;
@@ -917,11 +965,39 @@ static bool core_environment(unsigned cmd, void *data) {
 
 		return video_set_pixel_format(*fmt);
 	}
+
+#ifdef _WIN32
+    case RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER: {
+        unsigned* context_type = (unsigned*)data;
+        *context_type = RETRO_HW_CONTEXT_VULKAN;
+        printf("Preferring Vulkan\n");
+        return true;
+    }
+
+    case RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE: {
+        struct retro_hw_render_interface** interface = (struct retro_hw_render_interface**)data;
+        
+        printf("Providing Vulkan interface to core\n");
+        
+        if (*interface == NULL || (*interface)->interface_type == RETRO_HW_RENDER_INTERFACE_VULKAN) {
+            *interface = (struct retro_hw_render_interface*)&g_vk_interface;
+            return true;
+        }
+        
+        return false;
+    }
+#endif
+
     case RETRO_ENVIRONMENT_SET_HW_RENDER: {
         struct retro_hw_render_callback *hw = (struct retro_hw_render_callback*)data;
+#ifdef _WIN32
+        printf("Core wants Vulkan context\n");
+        hw->context_type = RETRO_HW_CONTEXT_VULKAN;
+#else
         hw->get_current_framebuffer = core_get_current_framebuffer;
         hw->get_proc_address = (retro_hw_get_proc_address_t)SDL_GL_GetProcAddress;
         g_video.hw = *hw;
+#endif
         return true;
     }
     case RETRO_ENVIRONMENT_SET_FRAME_TIME_CALLBACK: {
@@ -980,9 +1056,20 @@ static bool core_environment(unsigned cmd, void *data) {
     return false;
 }
 
+#ifdef _WIN32
+static void video_refresh_vulkan(const void* data, unsigned width, unsigned height, unsigned pitch) {
+    static int frame_count = 0;
+    printf("Vulkan frame %d - core handles everything\n", frame_count++);
+}
+#endif
+
 
 static void core_video_refresh(const void *data, unsigned width, unsigned height, size_t pitch) {
+#ifdef _WIN32
+    video_refresh_vulkan(data, width, height, pitch);
+#else
     video_refresh(data, width, height, pitch);
+#endif
 }
 
 
@@ -1153,6 +1240,10 @@ int main(int argc, char *argv[]) {
     if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO|SDL_INIT_EVENTS) < 0)
         die("Failed to initialize SDL");
 
+#ifdef _WIN32
+    create_vulkan_window(1280, 720);
+#else
+
     SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
     SDL_SetHint(SDL_HINT_RENDER_OPENGL_SHADERS, "1");
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0"); // Nearest neighbor
@@ -1166,7 +1257,7 @@ int main(int argc, char *argv[]) {
     // g_video.hw.context_type = RETRO_HW_CONTEXT_NONE;
     g_video.hw.context_reset   = noop;
     g_video.hw.context_destroy = noop;
-
+#endif
     // Load the core.
     core_load(argv[1]);
 
