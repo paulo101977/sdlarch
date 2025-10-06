@@ -69,7 +69,13 @@ static const char *g_fshader_src =
         "gl_FragColor = texture2D(u_tex, o_coord);\n"
     "}";
 
-
+#define RETRO_DEVICE_WIIMOTE RETRO_DEVICE_JOYPAD
+#define RETRO_DEVICE_WIIMOTE_SW ((2 << 8) | RETRO_DEVICE_JOYPAD)
+#define RETRO_DEVICE_WIIMOTE_NC ((3 << 8) | RETRO_DEVICE_JOYPAD)
+#define RETRO_DEVICE_WIIMOTE_CC ((4 << 8) | RETRO_DEVICE_JOYPAD)
+#define RETRO_DEVICE_WIIMOTE_CC_PRO ((5 << 8) | RETRO_DEVICE_JOYPAD)
+#define RETRO_DEVICE_GC_ON_WII ((6 << 8) | RETRO_DEVICE_JOYPAD)
+#define RETRO_DEVICE_REAL_WIIMOTE ((6 << 8) | RETRO_DEVICE_NONE)
 
 
 static struct {
@@ -108,7 +114,7 @@ struct keymap {
 
 struct EnvVariable {
     const char* key;
-    const char* value;
+    void* value;
 };
 
 struct EnvVariable s_envVariables[] = {
@@ -178,6 +184,9 @@ struct EnvVariable s_envVariables[] = {
 	// { "dolphin_cheats_enabled", "disabled" },
 	// { "dolphin_texture_cache_accuracy", "disabled" },
 	{ "dolphin_osd_enabled", "disabled" },
+    { "desmume_opengl_mode", "disabled" },
+    { "desmume_input_rotation", "180" },
+    { "citra_is_new_3ds", "New 3DS" },
     {NULL, NULL},
 };
 
@@ -475,7 +484,8 @@ static void video_configure(const struct retro_game_geometry *geom) {
 
 	if (!g_win)
 		create_window(nwidth, nheight);
-
+    else
+        SDL_SetWindowSize(g_win, nwidth, nheight);
 	if (g_video.tex_id)
 		glDeleteTextures(1, &g_video.tex_id);
 
@@ -666,8 +676,8 @@ static void core_log(enum retro_log_level level, const char *fmt, ...) {
 	fprintf(stderr, "[%s] %s", levelstr[level], buffer);
 	fflush(stderr);
 
-	if (level == RETRO_LOG_ERROR)
-		exit(EXIT_FAILURE);
+	// if (level == RETRO_LOG_ERROR)
+	// 	exit(EXIT_FAILURE);
 }
 
 static uintptr_t core_get_current_framebuffer() {
@@ -783,11 +793,11 @@ static bool core_environment(unsigned cmd, void *data) {
 	switch (cmd) {
     case RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE:
         return false;
-    case RETRO_ENVIRONMENT_GET_INPUT_DEVICE_CAPABILITIES: {
-        uint64_t* caps = (uint64_t*)data;
-        *caps = (1 << RETRO_DEVICE_JOYPAD);
-        return true;
-    }
+    // case RETRO_ENVIRONMENT_GET_INPUT_DEVICE_CAPABILITIES: {
+    //     uint64_t* caps = (uint64_t*)data;
+    //     *caps = (1 << RETRO_DEVICE_JOYPAD);
+    //     return true;
+    // }
 
     // case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS: {
     //     return true;
@@ -824,10 +834,10 @@ static bool core_environment(unsigned cmd, void *data) {
 
             outvar->key = strdup(invar->key);
 
-            // if(!strcmp(outvar->key, "dolphin_renderer")) {
-            //     free(outvar->value);
-            //     outvar->value = strdup("Software");
-            // }
+            if(!strcmp(outvar->key, "parallel-n64-rspplugin")) {
+                free(outvar->value);
+                outvar->value = strdup("glide64");
+            }
 
             // pcsx2_enable_rumble
             if(!strcmp(outvar->key, "pcsx2_enable_rumble1")) {
@@ -865,6 +875,12 @@ static bool core_environment(unsigned cmd, void *data) {
             // if(!strcmp(var->key, "dolphin_renderer")) {
             //     free(var->value);
             //     var->value = strdup("Software");
+            //     break;
+            // }
+
+            // if(!strcmp(var->key, "desmume_input_rotation")) {
+            //     free(var->value);
+            //     var->value = 180;
             //     break;
             // }
 
@@ -910,6 +926,11 @@ static bool core_environment(unsigned cmd, void *data) {
 
 		return video_set_pixel_format(*fmt);
 	}
+    case RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER: {
+        unsigned *fmt = (unsigned*)data;
+        *fmt = RETRO_HW_CONTEXT_OPENGL;
+        return true;
+    }
     case RETRO_ENVIRONMENT_SET_HW_RENDER: {
         struct retro_hw_render_callback *hw = (struct retro_hw_render_callback*)data;
         hw->get_current_framebuffer = core_get_current_framebuffer;
@@ -931,9 +952,15 @@ static bool core_environment(unsigned cmd, void *data) {
     case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY:
     case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY: {
         const char **dir = (const char**)data;
-        *dir = "./system";
+        *dir = "./system";   // BIOS, flash, assets
         return true;
     }
+
+    // case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY: {
+    //     const char **dir = (const char**)data;
+    //     *dir = "./saves";    // SAVEDATA (memory stick)
+    //     return true;
+    // }
     case RETRO_ENVIRONMENT_SET_GEOMETRY: {
         const struct retro_game_geometry *geom = (const struct retro_game_geometry *)data;
         g_video.clip_w = geom->base_width;
@@ -1159,6 +1186,8 @@ int main(int argc, char *argv[]) {
     // g_video.hw.context_type = RETRO_HW_CONTEXT_NONE;
     g_video.hw.context_reset   = noop;
     g_video.hw.context_destroy = noop;
+
+    create_window(640, 480);
 
     // Load the core.
     core_load(argv[1]);
