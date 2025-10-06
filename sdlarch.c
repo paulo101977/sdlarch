@@ -1,8 +1,29 @@
 #include <SDL.h>
 #include "libretro.h"
+#include "libretro_d3d.h"
 #include "glad.h"
 #include <stdio.h>
 #include <stdlib.h>
+
+#ifdef _WIN32
+#include <d3d11.h>
+#include <SDL_syswm.h>
+#include <d3dcompiler.h>
+#include <dxgi.h>
+#include <d3d11_1.h>
+#include <dxgi1_2.h>
+
+static ID3D11Device* g_d3d_device = NULL;
+static ID3D11DeviceContext* g_d3d_context = NULL;
+static IDXGISwapChain* g_swap_chain = NULL;
+static ID3D11RenderTargetView* g_render_target_view = NULL;
+static ID3D11Texture2D* g_core_texture = NULL;
+static ID3D11ShaderResourceView* g_texture_srv = NULL;
+static ID3D11SamplerState* g_sampler_state = NULL;
+
+
+
+#endif
 
 static SDL_Window *g_win = NULL;
 static SDL_GLContext *g_ctx = NULL;
@@ -18,29 +39,41 @@ static GLuint g_shader_program = 0;
 #ifdef main
 #undef main
 #endif
+
+#ifdef WinMain
+#undef WinMain
 #endif
+#endif
+
+static void noop() {}
 
 static float g_scale = 3;
 bool running = true;
 
 static struct {
-	GLuint tex_id;
-    GLuint fbo_id;
-    GLuint rbo_id;
+    uint32_t  fbo_id;
+    uint32_t  rbo_id;
 
     int glmajor;
     int glminor;
 
 
-	GLuint pitch;
-	GLint tex_w, tex_h;
-	GLuint clip_w, clip_h;
+	uint32_t  pitch;
+	int tex_w, tex_h;
+	int clip_w, clip_h;
 
-	GLuint pixfmt;
-	GLuint pixtype;
-	GLuint bpp;
+	uint32_t  pixfmt;
+	uint32_t  pixtype;
+	uint32_t  bpp;
 
     struct retro_hw_render_callback hw;
+
+    #ifdef _WIN32
+    ID3D11Texture2D* tex_id;
+    ID3D11RenderTargetView* rtv;
+    #else
+    uint32_t  tex_id;
+    #endif
 } g_video  = {0};
 
 static struct {
@@ -57,6 +90,37 @@ static struct {
 
 static struct retro_variable *g_vars = NULL;
 
+// d3d shaders
+#ifdef _WIN32
+static const char* g_vshader_src =
+    "struct VS_INPUT { float4 pos : POSITION; float2 tex : TEXCOORD0; };\n"
+    "struct VS_OUTPUT { float4 pos : SV_POSITION; float2 tex : TEXCOORD0; };\n"
+    "VS_OUTPUT main(VS_INPUT input) {\n"
+    "    VS_OUTPUT output;\n"
+    "    output.pos = input.pos;\n"
+    "    output.tex = input.tex;\n"
+    "    return output;\n"
+    "}";
+
+static const char* g_fshader_src =
+    "Texture2D texture0 : register(t0);\n"
+    "SamplerState sampler0 : register(s0);\n"
+    "struct PS_INPUT { float4 pos : SV_POSITION; float2 tex : TEXCOORD0; };\n"
+    "float4 main(PS_INPUT input) : SV_TARGET {\n"
+    "    return texture0.Sample(sampler0, input.tex);\n"
+    "}";
+
+
+static ID3D11VertexShader* g_vertex_shader = NULL;
+static ID3D11PixelShader* g_pixel_shader = NULL;
+static ID3D11InputLayout* g_input_layout = NULL;
+static ID3D11Buffer* g_vertex_buffer = NULL;
+
+#ifndef IID_ID3D11Texture2D
+DEFINE_GUID(IID_ID3D11Texture2D, 0x6f15aaf2, 0xd208, 0x4e89, 0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c);
+#endif
+
+#else
 static const char *g_vshader_src =
     "#version 150\n"
     "in vec2 i_pos;\n"
@@ -75,7 +139,7 @@ static const char *g_fshader_src =
     "void main() {\n"
         "gl_FragColor = texture2D(u_tex, o_coord);\n"
     "}";
-
+#endif
 
 
 
@@ -120,7 +184,12 @@ struct EnvVariable {
 
 struct EnvVariable s_envVariables[] = {
 	{ "pcsx2_enable_hw_hacks", "enabled" },
-	{ "pcsx2_renderer", "Software" },
+#ifdef _WIN32
+    { "pcsx2_renderer", "D3D11" },
+#else
+    { "pcsx2_renderer", "OpenGL" },
+#endif
+	
 	{ "pcsx2_software_clut_render", "Normal" },
 	{ "pcsx2_fastboot", "enabled" },
     { "pcsx2_blending_accuracy", "Medium" },
@@ -258,7 +327,97 @@ void ortho2d(float m[4][4], float left, float right, float bottom, float top) {
     m[3][1] = -(top + bottom) / (top - bottom);
 }
 
+#ifdef _WIN32
+static HRESULT compile_d3d11_shader(const char* source, const char* entry, const char* target, ID3DBlob** blob) {
+    ID3DBlob* error_blob = NULL;
+    
+    HRESULT hr = D3DCompile(source, strlen(source), NULL, NULL, NULL, 
+                           entry, target, D3DCOMPILE_DEBUG, 0, blob, &error_blob);
+    
+    if (FAILED(hr) && error_blob) {
+        OutputDebugStringA((char*)error_blob->lpVtbl->GetBufferPointer(error_blob));
+        error_blob->lpVtbl->Release(error_blob);
+    }
+    
+    return hr;
+}
 
+static void init_d3d11_shaders() {
+    ID3DBlob* vs_blob = NULL;
+    ID3DBlob* ps_blob = NULL;
+
+
+    if (FAILED(compile_d3d11_shader(g_vshader_src, "main", "vs_5_0", &vs_blob))) {
+        die("Failed to compile vertex shader");
+    }
+
+
+    if (FAILED(compile_d3d11_shader(g_fshader_src, "main", "ps_5_0", &ps_blob))) {
+        die("Failed to compile pixel shader");
+    }
+
+
+    if (FAILED(g_d3d_device->lpVtbl->CreateVertexShader(g_d3d_device, 
+        vs_blob->lpVtbl->GetBufferPointer(vs_blob), vs_blob->lpVtbl->GetBufferSize(vs_blob), 
+        NULL, &g_vertex_shader))) {
+        die("Failed to create vertex shader");
+    }
+
+
+    if (FAILED(g_d3d_device->lpVtbl->CreatePixelShader(g_d3d_device,
+        ps_blob->lpVtbl->GetBufferPointer(ps_blob), ps_blob->lpVtbl->GetBufferSize(ps_blob),
+        NULL, &g_pixel_shader))) {
+        die("Failed to create pixel shader");
+    }
+
+
+    D3D11_INPUT_ELEMENT_DESC layout[] = {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+    };
+
+    if (FAILED(g_d3d_device->lpVtbl->CreateInputLayout(g_d3d_device, layout, 2,
+        vs_blob->lpVtbl->GetBufferPointer(vs_blob), vs_blob->lpVtbl->GetBufferSize(vs_blob),
+        &g_input_layout))) {
+        die("Failed to create input layout");
+    }
+
+
+    float vertices[] = {
+        // pos              // tex
+        -1.0f,  1.0f, 0.0f, 1.0f,  0.0f, 0.0f,  // top-left
+         1.0f,  1.0f, 0.0f, 1.0f,  1.0f, 0.0f,  // top-right
+        -1.0f, -1.0f, 0.0f, 1.0f,  0.0f, 1.0f,  // bottom-left
+         1.0f, -1.0f, 0.0f, 1.0f,  1.0f, 1.0f   // bottom-right
+    };
+
+    D3D11_BUFFER_DESC vb_desc = {0};
+    vb_desc.ByteWidth = sizeof(vertices);
+    vb_desc.Usage = D3D11_USAGE_DEFAULT;
+    vb_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+
+    D3D11_SUBRESOURCE_DATA vb_data = {0};
+    vb_data.pSysMem = vertices;
+
+    if (FAILED(g_d3d_device->lpVtbl->CreateBuffer(g_d3d_device, &vb_desc, &vb_data, &g_vertex_buffer))) {
+        die("Failed to create vertex buffer");
+    }
+
+
+    D3D11_SAMPLER_DESC sampler_desc = {0};
+    sampler_desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+    sampler_desc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sampler_desc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sampler_desc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+
+    if (FAILED(g_d3d_device->lpVtbl->CreateSamplerState(g_d3d_device, &sampler_desc, &g_sampler_state))) {
+        die("Failed to create sampler state");
+    }
+
+    if (vs_blob) vs_blob->lpVtbl->Release(vs_blob);
+    if (ps_blob) ps_blob->lpVtbl->Release(ps_blob);
+}
+#else
 
 static void init_shaders() {
     if (g_shader_program != 0) {
@@ -381,13 +540,39 @@ static void init_framebuffer(int width, int height)
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+#endif // end linux or macOS
 
 static void resize_cb(int w, int h) {
+#ifndef _WIN32
 	glViewport(0, 0, w, h);
+#else
+    if (g_render_target_view) {
+        g_render_target_view->lpVtbl->Release(g_render_target_view);
+        g_render_target_view = NULL;
+    }
+
+    g_d3d_context->lpVtbl->OMSetRenderTargets(g_d3d_context, 0, NULL, NULL);
+    g_swap_chain->lpVtbl->ResizeBuffers(g_swap_chain, 0, w, h, DXGI_FORMAT_UNKNOWN, 0);
+
+    ID3D11Texture2D* back_buffer = NULL;
+    g_swap_chain->lpVtbl->GetBuffer(g_swap_chain, 0, &IID_ID3D11Texture2D, (void**)&back_buffer);
+    g_d3d_device->lpVtbl->CreateRenderTargetView(g_d3d_device, (ID3D11Resource*)back_buffer, NULL, &g_render_target_view);
+    back_buffer->lpVtbl->Release(back_buffer);
+
+    D3D11_VIEWPORT viewport = {0};
+    viewport.Width = (float)w;
+    viewport.Height = (float)h;
+    viewport.MinDepth = 0.0f;
+    viewport.MaxDepth = 1.0f;
+    g_d3d_context->lpVtbl->RSSetViewports(g_d3d_context, 1, &viewport);
+
+    g_d3d_context->lpVtbl->OMSetRenderTargets(g_d3d_context, 1, &g_render_target_view, NULL);
+#endif
 }
 
 
 static void create_window(int width, int height) {
+#ifndef _WIN32
     SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
@@ -420,7 +605,7 @@ static void create_window(int width, int height) {
 
     g_win = SDL_CreateWindow("sdlarch", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, SDL_WINDOW_OPENGL);
 
-	if (!g_win)
+    if (!g_win)
         die("Failed to create window: %s", SDL_GetError());
 
     g_ctx = SDL_GL_CreateContext(g_win);
@@ -448,6 +633,223 @@ static void create_window(int width, int height) {
     SDL_GL_SwapWindow(g_win); // make apitrace output nicer
 
     resize_cb(width, height);
+#else
+    g_win = SDL_CreateWindow(
+        "sdlarch-d3d11", 
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
+        width, height, 
+        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
+    );
+
+    if (!g_win)
+        die("Failed to create window: %s", SDL_GetError());
+
+    SDL_SysWMinfo wm_info;
+    SDL_VERSION(&wm_info.version);
+    SDL_GetWindowWMInfo(g_win, &wm_info);
+    HWND hwnd = wm_info.info.win.window;
+
+    printf("Window HWND: %p\n", hwnd);
+
+    // Usar D3D11.1 explicitamente
+    ID3D11Device1* device1 = NULL;
+    ID3D11DeviceContext1* context1 = NULL;
+    IDXGISwapChain1* swap_chain1 = NULL;
+
+    // Feature levels - incluir 11.1
+    D3D_FEATURE_LEVEL feature_levels[] = {
+        D3D_FEATURE_LEVEL_11_1,
+        D3D_FEATURE_LEVEL_11_0,
+        D3D_FEATURE_LEVEL_10_1,
+        D3D_FEATURE_LEVEL_10_0,
+    };
+
+    UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+#ifdef _DEBUG
+    flags |= D3D11_CREATE_DEVICE_DEBUG;
+#endif
+
+    // Criar dispositivo D3D11.1
+    D3D_FEATURE_LEVEL actual_feature_level;
+    HRESULT hr = D3D11CreateDevice(
+        NULL,
+        D3D_DRIVER_TYPE_HARDWARE,
+        NULL,
+        flags,
+        feature_levels,
+        sizeof(feature_levels) / sizeof(feature_levels[0]),
+        D3D11_SDK_VERSION,
+        (ID3D11Device**)&device1,
+        &actual_feature_level,
+        (ID3D11DeviceContext**)&context1
+    );
+
+    if (FAILED(hr)) {
+        die("Failed to create D3D11.1 device: 0x%08X", hr);
+    }
+
+    printf("D3D11.1 device created successfully!\n");
+    printf("Feature Level: %d.%d\n", 
+           (actual_feature_level >> 12) & 0xF, 
+           (actual_feature_level >> 8) & 0xF);
+
+    // Obter DXGI factory
+    IDXGIDevice2* dxgi_device = NULL;
+    hr = device1->lpVtbl->QueryInterface(device1, &IID_IDXGIDevice2, (void**)&dxgi_device);
+    if (FAILED(hr)) {
+        die("Failed to get DXGI device 2: 0x%08X", hr);
+    }
+
+    IDXGIAdapter* adapter = NULL;
+    hr = dxgi_device->lpVtbl->GetAdapter(dxgi_device, &adapter);
+    if (FAILED(hr)) {
+        dxgi_device->lpVtbl->Release(dxgi_device);
+        die("Failed to get adapter: 0x%08X", hr);
+    }
+
+    IDXGIFactory2* factory = NULL;
+    hr = adapter->lpVtbl->GetParent(adapter, &IID_IDXGIFactory2, (void**)&factory);
+    if (FAILED(hr)) {
+        adapter->lpVtbl->Release(adapter);
+        dxgi_device->lpVtbl->Release(dxgi_device);
+        die("Failed to get DXGI factory 2: 0x%08X", hr);
+    }
+
+    // Configurar swap chain desc para D3D11.1
+    DXGI_SWAP_CHAIN_DESC1 sc_desc = {0};
+    sc_desc.Width = width;
+    sc_desc.Height = height;
+    sc_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    sc_desc.SampleDesc.Count = 1;
+    sc_desc.SampleDesc.Quality = 0;
+    sc_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    sc_desc.BufferCount = 2;
+    sc_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    sc_desc.Scaling = DXGI_SCALING_STRETCH;
+    sc_desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+
+    // Criar swap chain
+    hr = factory->lpVtbl->CreateSwapChainForHwnd(factory, 
+                                                (IUnknown*)device1, 
+                                                hwnd, 
+                                                &sc_desc, 
+                                                NULL, 
+                                                NULL, 
+                                                &swap_chain1);
+    if (FAILED(hr)) {
+        factory->lpVtbl->Release(factory);
+        adapter->lpVtbl->Release(adapter);
+        dxgi_device->lpVtbl->Release(dxgi_device);
+        die("Failed to create swap chain 1: 0x%08X", hr);
+    }
+
+    // Converter para interfaces regulares (para compatibilidade)
+    g_d3d_device = (ID3D11Device*)device1;
+    g_d3d_context = (ID3D11DeviceContext*)context1;
+    
+    hr = swap_chain1->lpVtbl->QueryInterface(swap_chain1, &IID_IDXGISwapChain, (void**)&g_swap_chain);
+    swap_chain1->lpVtbl->Release(swap_chain1);
+    
+    if (FAILED(hr)) {
+        factory->lpVtbl->Release(factory);
+        adapter->lpVtbl->Release(adapter);
+        dxgi_device->lpVtbl->Release(dxgi_device);
+        die("Failed to get regular swap chain: 0x%08X", hr);
+    }
+
+    // Criar render target view
+    ID3D11Texture2D* back_buffer = NULL;
+    hr = g_swap_chain->lpVtbl->GetBuffer(g_swap_chain, 0, &IID_ID3D11Texture2D, (void**)&back_buffer);
+    if (FAILED(hr)) {
+        die("Failed to get back buffer: 0x%08X", hr);
+    }
+
+    hr = g_d3d_device->lpVtbl->CreateRenderTargetView(g_d3d_device, (ID3D11Resource*)back_buffer, NULL, &g_render_target_view);
+    back_buffer->lpVtbl->Release(back_buffer);
+    
+    if (FAILED(hr)) {
+        die("Failed to create render target view: 0x%08X", hr);
+    }
+
+    // Configurar viewport
+    D3D11_VIEWPORT viewport = {0};
+    viewport.Width = (float)width;
+    viewport.Height = (float)height;
+    viewport.MinDepth = 0.0f;
+    viewport.MaxDepth = 1.0f;
+    g_d3d_context->lpVtbl->RSSetViewports(g_d3d_context, 1, &viewport);
+
+    g_d3d_context->lpVtbl->OMSetRenderTargets(g_d3d_context, 1, &g_render_target_view, NULL);
+
+    // Limpar recursos
+    factory->lpVtbl->Release(factory);
+    adapter->lpVtbl->Release(adapter);
+    dxgi_device->lpVtbl->Release(dxgi_device);
+
+    printf("D3D11.1 initialization completed successfully!\n");
+    printf("Device1: %p, Context1: %p, SwapChain: %p\n", device1, context1, g_swap_chain);
+
+    // HRESULT hr = D3D11CreateDeviceAndSwapChain(
+    //     NULL,
+    //     D3D_DRIVER_TYPE_HARDWARE,
+    //     NULL,
+    //     flags,
+    //     feature_levels,
+    //     sizeof(feature_levels) / sizeof(feature_levels[0]),
+    //     D3D11_SDK_VERSION,
+    //     &sc_desc,
+    //     &g_swap_chain,
+    //     &g_d3d_device,
+    //     NULL,
+    //     &g_d3d_context
+    // );
+
+    // if (FAILED(hr)) {
+    //     die("Failed to create D3D11 device and swap chain");
+    // }
+
+    // printf("D3D11 device created successfully >>>>>>>>>>>>>>>!\n");
+    // printf("Feature Level: %d.%d\n", 
+    //        (actual_feature_level >> 12) & 0xF, 
+    //        (actual_feature_level >> 8) & 0xF);
+    // printf("Device: %p, Context: %p\n", g_d3d_device, g_d3d_context);
+
+    // ID3D11Texture2D* back_buffer = NULL;
+    // hr = g_swap_chain->lpVtbl->GetBuffer(g_swap_chain, 0, &IID_ID3D11Texture2D, (void**)&back_buffer);
+    // if (FAILED(hr)) {
+    //     die("Failed to get back buffer");
+    // }
+
+    // hr = g_d3d_device->lpVtbl->CreateRenderTargetView(g_d3d_device, (ID3D11Resource*)back_buffer, NULL, &g_render_target_view);
+    // back_buffer->lpVtbl->Release(back_buffer);
+    
+    // if (FAILED(hr)) {
+    //     die("Failed to create render target view");
+    // }
+
+    // D3D11_VIEWPORT viewport = {0};
+    // viewport.Width = (float)width;
+    // viewport.Height = (float)height;
+    // viewport.MinDepth = 0.0f;
+    // viewport.MaxDepth = 1.0f;
+    // g_d3d_context->lpVtbl->RSSetViewports(g_d3d_context, 1, &viewport);
+
+    // init_d3d11_shaders();
+
+    // g_d3d_context->lpVtbl->OMSetRenderTargets(g_d3d_context, 1, &g_render_target_view, NULL);
+    
+    // UINT stride = 6 * sizeof(float);
+    // UINT offset = 0;
+    // g_d3d_context->lpVtbl->IASetVertexBuffers(g_d3d_context, 0, 1, &g_vertex_buffer, &stride, &offset);
+    // g_d3d_context->lpVtbl->IASetInputLayout(g_d3d_context, g_input_layout);
+    // g_d3d_context->lpVtbl->IASetPrimitiveTopology(g_d3d_context, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+
+    // g_d3d_context->lpVtbl->VSSetShader(g_d3d_context, g_vertex_shader, NULL, 0);
+    // g_d3d_context->lpVtbl->PSSetShader(g_d3d_context, g_pixel_shader, NULL, 0);
+    // g_d3d_context->lpVtbl->PSSetSamplers(g_d3d_context, 0, 1, &g_sampler_state);
+
+
+#endif
 
     // TODO: make the same in sdlarch-rl
     if (g_video.hw.context_reset) {
@@ -475,14 +877,10 @@ static void video_configure(const struct retro_game_geometry *geom) {
 
 	resize_to_aspect(geom->aspect_ratio, geom->base_width * 1, geom->base_height * 1, &nwidth, &nheight);
 
-	// nwidth *= g_scale;
-	// nheight *= g_scale;
-    // nwidth *= g_scale;
-	// nheight *= g_scale;
-
 	if (!g_win)
 		create_window(nwidth, nheight);
 
+#ifndef _WIN32
 	if (g_video.tex_id)
 		glDeleteTextures(1, &g_video.tex_id);
 
@@ -525,6 +923,60 @@ static void video_configure(const struct retro_game_geometry *geom) {
 	g_video.clip_h = geom->base_height;
 
 	refresh_vertex_data();
+#else
+    if (g_video.tex_id) {
+        g_video.tex_id->lpVtbl->Release(g_video.tex_id);
+        g_video.tex_id = NULL;
+    }
+
+    if (g_video.rtv) {
+        g_video.rtv->lpVtbl->Release(g_video.rtv);
+        g_video.rtv = NULL;
+    }
+
+    D3D11_TEXTURE2D_DESC tex_desc = {0};
+    tex_desc.Width = geom->max_width;
+    tex_desc.Height = geom->max_height;
+    tex_desc.MipLevels = 1;
+    tex_desc.ArraySize = 1;
+    tex_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    tex_desc.SampleDesc.Count = 1;
+    tex_desc.Usage = D3D11_USAGE_DEFAULT;
+    tex_desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    tex_desc.CPUAccessFlags = 0;
+
+    HRESULT hr = g_d3d_device->lpVtbl->CreateTexture2D(g_d3d_device, &tex_desc, NULL, &g_video.tex_id);
+    if (FAILED(hr)) {
+        die("Failed to create core texture");
+    }
+
+    hr = g_d3d_device->lpVtbl->CreateRenderTargetView(g_d3d_device, (ID3D11Resource*)g_video.tex_id, NULL, &g_video.rtv);
+    if (FAILED(hr)) {
+        die("Failed to create RTV for core texture");
+    }
+
+    if (g_texture_srv) {
+        g_texture_srv->lpVtbl->Release(g_texture_srv);
+        g_texture_srv = NULL;
+    }
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc = {0};
+    srv_desc.Format = tex_desc.Format;
+    srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    srv_desc.Texture2D.MipLevels = 1;
+
+    hr = g_d3d_device->lpVtbl->CreateShaderResourceView(g_d3d_device, (ID3D11Resource*)g_video.tex_id, &srv_desc, &g_texture_srv);
+    if (FAILED(hr)) {
+        die("Failed to create SRV for core texture");
+    }
+
+    g_video.tex_w = geom->max_width;
+    g_video.tex_h = geom->max_height;
+    g_video.clip_w = geom->base_width;
+    g_video.clip_h = geom->base_height;
+
+    SDL_SetWindowSize(g_win, nwidth, nheight);
+#endif
 
     // TODO: make the same in sdlarch-rl
     if (g_video.hw.context_reset) {
@@ -559,7 +1011,7 @@ static bool video_set_pixel_format(unsigned format) {
 
 
 static void video_refresh(const void *data, unsigned width, unsigned height, unsigned pitch) {
-
+#ifndef _WIN32
     // TODO: make the same in sdlarch-rl
     if ((g_video.clip_w != width || g_video.clip_h != height) && (width != 0 && height != 0)) {
         g_video.clip_h = height;
@@ -590,9 +1042,71 @@ static void video_refresh(const void *data, unsigned width, unsigned height, uns
     }
 
     SDL_GL_SwapWindow(g_win);
+#else
+    if (g_d3d_device == NULL || g_d3d_context == NULL) {
+        printf("ERROR: D3D11 context is NULL in video_refresh!\n");
+        return;
+    }
+    static int frame_count = 0;
+    printf("=== VIDEO_REFRESH Frame %d ===\n", frame_count);
+    printf("Data pointer: %p\n", data);
+    printf("Size: %ux%u, Pitch: %u\n", width, height, pitch);
+
+    
+    float clear_color[4] = {0.1f, 0.1f, 0.1f, 1.0f};
+
+    g_d3d_context->lpVtbl->ClearRenderTargetView(g_d3d_context, g_render_target_view, clear_color);
+    g_swap_chain->lpVtbl->Present(g_swap_chain, 1, 0);
+
+    if (data == RETRO_HW_FRAME_BUFFER_VALID) {
+        printf(">>> HW FRAME BUFFER VALID <<<\n");
+        
+        // O Dolphin diz que tem um frame válido - apresentar
+        HRESULT hr = g_swap_chain->lpVtbl->Present(g_swap_chain, 1, 0);
+        printf("Present result: 0x%08X\n", hr);
+        
+    } else if (data == NULL) {
+        printf(">>> NULL FRAME <<<\n");
+        // Apenas apresentar o que já está no buffer
+        g_swap_chain->lpVtbl->Present(g_swap_chain, 1, 0);
+        
+    } else {
+        printf(">>> SOFTWARE FRAME - UNEXPECTED FOR D3D11 <<<\n");
+        // Frame de software - isso não deveria acontecer com D3D11
+        g_swap_chain->lpVtbl->Present(g_swap_chain, 1, 0);
+    }
+    
+    frame_count++;
+    printf("=== END FRAME %d ===\n\n", frame_count);
+    
+    // g_d3d_context->lpVtbl->ClearRenderTargetView(g_d3d_context, g_render_target_view, clear_color);
+
+    // if (data == RETRO_HW_FRAME_BUFFER_VALID) {
+    //     g_swap_chain->lpVtbl->Present(g_swap_chain, 1, 0);
+        
+    // } else if (data && data != RETRO_HW_FRAME_BUFFER_VALID) {
+    //     if (g_video.tex_id && width > 0 && height > 0) {
+    //         D3D11_BOX box = {0};
+    //         box.right = width;
+    //         box.bottom = height;
+    //         box.back = 1;
+
+    //         g_d3d_context->lpVtbl->UpdateSubresource(g_d3d_context, 
+    //             (ID3D11Resource*)g_video.tex_id, 0, &box, data, pitch, 0);
+
+    //         g_d3d_context->lpVtbl->PSSetShaderResources(g_d3d_context, 0, 1, &g_texture_srv);
+    //         g_d3d_context->lpVtbl->Draw(g_d3d_context, 4, 0);
+    //     }
+        
+    //     g_swap_chain->lpVtbl->Present(g_swap_chain, 1, 0);
+    // } else {
+    //     g_swap_chain->lpVtbl->Present(g_swap_chain, 1, 0);
+    // }
+#endif
 }
 
 static void video_deinit() {
+#ifndef _WIN32
     if (g_video.fbo_id)
         glDeleteFramebuffers(1, &g_video.fbo_id);
 
@@ -620,6 +1134,72 @@ static void video_deinit() {
     g_ctx = NULL;
 
     SDL_DestroyWindow(g_win);
+#else
+    if (g_texture_srv) {
+        g_texture_srv->lpVtbl->Release(g_texture_srv);
+        g_texture_srv = NULL;
+    }
+    
+    if (g_video.tex_id) {
+        g_video.tex_id->lpVtbl->Release(g_video.tex_id);
+        g_video.tex_id = NULL;
+    }
+    
+    if (g_video.rtv) {
+        g_video.rtv->lpVtbl->Release(g_video.rtv);
+        g_video.rtv = NULL;
+    }
+    
+    if (g_vertex_shader) {
+        g_vertex_shader->lpVtbl->Release(g_vertex_shader);
+        g_vertex_shader = NULL;
+    }
+    
+    if (g_pixel_shader) {
+        g_pixel_shader->lpVtbl->Release(g_pixel_shader);
+        g_pixel_shader = NULL;
+    }
+    
+    if (g_input_layout) {
+        g_input_layout->lpVtbl->Release(g_input_layout);
+        g_input_layout = NULL;
+    }
+    
+    if (g_vertex_buffer) {
+        g_vertex_buffer->lpVtbl->Release(g_vertex_buffer);
+        g_vertex_buffer = NULL;
+    }
+    
+    if (g_sampler_state) {
+        g_sampler_state->lpVtbl->Release(g_sampler_state);
+        g_sampler_state = NULL;
+    }
+    
+    if (g_render_target_view) {
+        g_render_target_view->lpVtbl->Release(g_render_target_view);
+        g_render_target_view = NULL;
+    }
+    
+    if (g_swap_chain) {
+        g_swap_chain->lpVtbl->Release(g_swap_chain);
+        g_swap_chain = NULL;
+    }
+    
+    if (g_d3d_context) {
+        g_d3d_context->lpVtbl->Release(g_d3d_context);
+        g_d3d_context = NULL;
+    }
+    
+    if (g_d3d_device) {
+        g_d3d_device->lpVtbl->Release(g_d3d_device);
+        g_d3d_device = NULL;
+    }
+
+    if (g_win) {
+        SDL_DestroyWindow(g_win);
+        g_win = NULL;
+    }
+#endif
 }
 
 
@@ -678,8 +1258,49 @@ static void core_log(enum retro_log_level level, const char *fmt, ...) {
 }
 
 static uintptr_t core_get_current_framebuffer() {
+#ifndef _WIN32
     return g_video.fbo_id;
+#else
+    printf("core_get_current_framebuffer called >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> \n");
+    if (g_video.tex_id == NULL && g_d3d_device != NULL) {
+        D3D11_TEXTURE2D_DESC tex_desc = {0};
+        tex_desc.Width = 640;
+        tex_desc.Height = 528;
+        tex_desc.MipLevels = 1;
+        tex_desc.ArraySize = 1;
+        tex_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        tex_desc.SampleDesc.Count = 1;
+        tex_desc.Usage = D3D11_USAGE_DEFAULT;
+        tex_desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        
+        HRESULT hr = g_d3d_device->lpVtbl->CreateTexture2D(g_d3d_device, &tex_desc, NULL, &g_video.tex_id);
+        if (FAILED(hr)) {
+            printf("Failed to create framebuffer texture for Dolphin\n");
+            return 0;
+        }
+        
+        hr = g_d3d_device->lpVtbl->CreateRenderTargetView(g_d3d_device, (ID3D11Resource*)g_video.tex_id, NULL, &g_video.rtv);
+        if (FAILED(hr)) {
+            printf("Failed to create RTV for Dolphin framebuffer\n");
+            return 0;
+        }
+    }
+    
+    return (uintptr_t)g_video.rtv;
+#endif
 }
+
+// #ifdef _WIN32
+// static struct retro_hw_render_interface_d3d11 g_d3d11_interface = {
+//     .interface_type = RETRO_HW_RENDER_INTERFACE_D3D11,
+//     .interface_version = RETRO_HW_RENDER_INTERFACE_D3D11_VERSION,
+//     .handle = NULL,
+//     .device = NULL,
+//     .context = NULL,
+//     .featureLevel = D3D_FEATURE_LEVEL_11_0,
+//     .D3DCompile = NULL
+// };
+// #endif
 
 /**
  * cpu_features_get_time_usec:
@@ -920,9 +1541,80 @@ static bool core_environment(unsigned cmd, void *data) {
     case RETRO_ENVIRONMENT_SET_HW_RENDER: {
         struct retro_hw_render_callback *hw = (struct retro_hw_render_callback*)data;
         hw->get_current_framebuffer = core_get_current_framebuffer;
+#ifndef _WIN32
         hw->get_proc_address = (retro_hw_get_proc_address_t)SDL_GL_GetProcAddress;
+#else
+        if(hw->context_type == RETRO_HW_CONTEXT_D3D11) {
+            hw->get_proc_address = NULL;
+            hw->context_reset = noop;
+            hw->context_destroy = noop;
+            hw->depth = true;
+            hw->stencil = false;
+            hw->bottom_left_origin = false;
+            
+            g_video.hw = *hw;
+            printf("D3D11 context configured for Dolphin\n");
+            return true;
+        } else {
+            printf("Unsupported context type for Dolphin: %u\n", hw->context_type);
+        }
+        
+#endif
         g_video.hw = *hw;
         return true;
+    }
+    case RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER: {
+        unsigned* context_type = (unsigned*)data;
+#ifdef _WIN32
+        *context_type = RETRO_HW_CONTEXT_D3D11;
+#else
+        *context_type = RETRO_HW_CONTEXT_OPENGL_CORE;
+#endif
+        return true;
+    }
+
+
+    case RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE: {
+#ifdef _WIN32
+        void** interface_ptr = (void**)data;
+        
+        struct retro_hw_render_interface_d3d11 d3d11_interface = {
+            .interface_type = RETRO_HW_RENDER_INTERFACE_D3D11,
+            .interface_version = RETRO_HW_RENDER_INTERFACE_D3D11_VERSION,
+            .handle = NULL,
+            .device = g_d3d_device,
+            .context = g_d3d_context,
+            .featureLevel = D3D_FEATURE_LEVEL_11_0,
+            .D3DCompile = NULL
+        };
+        
+        // Obter o feature level real do dispositivo
+        if (g_d3d_device) {
+            D3D_FEATURE_LEVEL feature_level = g_d3d_device->lpVtbl->GetFeatureLevel(g_d3d_device);
+            d3d11_interface.featureLevel = feature_level;
+            printf("Reporting feature level: %d.%d to core\n", 
+                   (feature_level >> 12) & 0xF, (feature_level >> 8) & 0xF);
+        } else {
+            d3d11_interface.featureLevel = D3D_FEATURE_LEVEL_11_0;
+            printf("WARNING: No D3D device, assuming feature level 11.0\n");
+        }
+        
+        // Carregar D3DCompile
+        HMODULE d3dcompiler = GetModuleHandleA("D3DCompiler_47.dll");
+        if (!d3dcompiler) {
+            d3dcompiler = LoadLibraryA("D3DCompiler_47.dll");
+        }
+        if (d3dcompiler) {
+            d3d11_interface.D3DCompile = GetProcAddress(d3dcompiler, "D3DCompile");
+        } else {
+            d3d11_interface.D3DCompile = NULL;
+        }
+        
+        *interface_ptr  = (void*)&d3d11_interface;
+        return true;
+#else
+        return false;
+#endif
     }
     case RETRO_ENVIRONMENT_SET_FRAME_TIME_CALLBACK: {
         const struct retro_frame_time_callback *frame_time =
@@ -950,7 +1642,9 @@ static bool core_environment(unsigned cmd, void *data) {
 
         // some cores call this before we even have a window
         if (g_win) {
+#ifndef _WIN32
             refresh_vertex_data();
+#endif
 
             int ow = 0, oh = 0;
             resize_to_aspect(geom->aspect_ratio, geom->base_width, geom->base_height, &ow, &oh);
@@ -1144,8 +1838,6 @@ static void core_unload() {
         SDL_UnloadObject(g_retro.handle);
 }
 
-static void noop() {}
-
 int main(int argc, char *argv[]) {
 	if (argc < 2)
 		die("usage: %s <core> [game]", argv[0]);
@@ -1153,6 +1845,7 @@ int main(int argc, char *argv[]) {
     if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO|SDL_INIT_EVENTS) < 0)
         die("Failed to initialize SDL");
 
+#ifndef _WIN32
     SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
     SDL_SetHint(SDL_HINT_RENDER_OPENGL_SHADERS, "1");
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0"); // Nearest neighbor
@@ -1163,9 +1856,16 @@ int main(int argc, char *argv[]) {
     g_video.hw.version_major = 4;
     g_video.hw.version_minor = 5;
     g_video.hw.context_type  = RETRO_HW_CONTEXT_OPENGL_CORE;
+#else
+    g_video.hw.context_type = RETRO_HW_CONTEXT_D3D11;
+    g_video.hw.version_major = 11;
+    g_video.hw.version_minor = 0;
+#endif
     // g_video.hw.context_type = RETRO_HW_CONTEXT_NONE;
     g_video.hw.context_reset   = noop;
     g_video.hw.context_destroy = noop;
+
+    create_window(640, 480);
 
     // Load the core.
     core_load(argv[1]);
@@ -1214,6 +1914,7 @@ int main(int argc, char *argv[]) {
 
         SDL_GL_MakeCurrent(g_win, g_ctx);
         // glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
 		g_retro.retro_run();
 	}
 

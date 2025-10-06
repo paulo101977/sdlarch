@@ -104,6 +104,10 @@ if(WIN32)
         glad  
         ${SDL2_LIBRARY}
         opengl32.lib
+        d3d11.lib
+        d3dcompiler.lib
+        dxgi.lib
+        dxguid.lib
     )
 
     
@@ -111,6 +115,10 @@ if(WIN32)
     #     PREFIX ""
     #     SUFFIX ".dll"
     # )
+
+    set_target_properties(sdlarch PROPERTIES
+        LINK_FLAGS "/SUBSYSTEM:CONSOLE"
+    )
     
 else()
     # Linux/WSL
