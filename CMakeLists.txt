@@ -37,6 +37,10 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release)
 
+
+set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -O0")
+
 add_definitions(-DGLAD_GLAPI_EXPORT)
 add_definitions(-DGLAD_GLAPI_EXPORT_BUILD)
 
@@ -100,9 +104,11 @@ target_include_directories(glad PRIVATE
     .
 )
 
-if(Vulkan_FOUND)
+if(WIN32 AND Vulkan_FOUND)
     target_link_libraries(sdlarch Vulkan::Vulkan)
 endif()
+
+target_compile_definitions(sdlarch PRIVATE HAS_VULKAN=1)
 
 if(WIN32)
     target_link_libraries(sdlarch PRIVATE
@@ -124,6 +130,8 @@ else()
         OpenGL::GL
         dl
         pthread
+        glad
+        Vulkan::Vulkan
     )
     
     

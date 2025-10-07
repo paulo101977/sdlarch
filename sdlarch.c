@@ -4,20 +4,34 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#ifdef _WIN32
+#ifdef HAS_VULKAN
 // #include <SDL_vulkan.h>
+#include "libretro_vulkan.h"
+#include <SDL_vulkan.h>
+#include <vulkan/vulkan.h>
 
 #define RETRO_HW_RENDER_INTERFACE_VULKAN_VERSION 5
 
+struct retro_vulkan_context;
+
 struct retro_hw_render_interface_vulkan {
     struct retro_hw_render_interface interface;
-    void* instance;
-    void* physical_device;
-    void* device;
-    void* queue;
-    uint32_t queue_family_index;
-    void* (*get_instance_proc_addr)(void* instance, const char* name);
-    void* (*get_device_proc_addr)(void* device, const char* name);
+    void* handle;
+    VkInstance instance;
+    VkPhysicalDevice gpu;
+    VkDevice device;
+    PFN_vkGetDeviceProcAddr get_device_proc_addr;
+    PFN_vkGetInstanceProcAddr get_instance_proc_addr;
+    VkQueue queue;
+    unsigned queue_index;
+    retro_vulkan_set_image_t set_image;
+    retro_vulkan_get_sync_index_t get_sync_index;
+    retro_vulkan_get_sync_index_mask_t get_sync_index_mask;
+    retro_vulkan_set_command_buffers_t set_command_buffers;
+    retro_vulkan_wait_sync_index_t wait_sync_index;
+    retro_vulkan_lock_queue_t lock_queue;
+    retro_vulkan_unlock_queue_t unlock_queue;
+    retro_vulkan_set_signal_semaphore_t set_signal_semaphore;
 };
 
 static struct retro_hw_render_interface_vulkan g_vk_interface = {
@@ -25,15 +39,26 @@ static struct retro_hw_render_interface_vulkan g_vk_interface = {
         .interface_type = RETRO_HW_RENDER_INTERFACE_VULKAN,
         .interface_version = RETRO_HW_RENDER_INTERFACE_VULKAN_VERSION,
     },
-    .instance = NULL,
-    .physical_device = NULL,
-    .device = NULL,
-    .queue = NULL,
-    .queue_family_index = 0,
+    .instance = VK_NULL_HANDLE,
+    .gpu = VK_NULL_HANDLE,
+    .device = VK_NULL_HANDLE,
+    .queue = VK_NULL_HANDLE,
+    .queue_index = 0,
     .get_instance_proc_addr = NULL,
     .get_device_proc_addr = NULL,
+    .set_image = NULL,
+    .get_sync_index = NULL,
+    .get_sync_index_mask = NULL,
+    .set_command_buffers = NULL,
+    .wait_sync_index = NULL,
+    .lock_queue = NULL,
+    .unlock_queue = NULL,
+    .set_signal_semaphore = NULL
 };
+#endif
 
+#ifndef _WIN32
+    #define _strdup strdup
 #endif
 
 static SDL_Window *g_win = NULL;
@@ -150,9 +175,333 @@ struct EnvVariable {
     const char* value;
 };
 
+#ifdef HAS_VULKAN
+static VkInstance g_vk_instance = VK_NULL_HANDLE;
+static VkSurfaceKHR g_vk_surface = VK_NULL_HANDLE;
+static VkPhysicalDevice g_vk_physical_device = VK_NULL_HANDLE;
+static VkDevice g_vk_device = VK_NULL_HANDLE;
+static VkQueue g_vk_queue = VK_NULL_HANDLE;
+static uint32_t g_vk_queue_family = 0;
+static int g_vk_initialized = 0;
+static int g_vk_failed = 0;
+
+
+static bool create_device(struct retro_vulkan_context* context, VkInstance instance, VkPhysicalDevice gpu,
+                         VkSurfaceKHR surface, PFN_vkGetInstanceProcAddr get_instance_proc_addr,
+                         const char** required_device_extensions, unsigned num_required_device_extensions,
+                         const char** required_device_layers, unsigned num_required_device_layers,
+                         const VkPhysicalDeviceFeatures* required_features) {
+    
+    printf("Core requesting Vulkan device creation >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> \n");
+    printf("  Instance: %p\n", instance);
+    printf("  Physical Device: %p\n", gpu);
+    printf("  Surface: %p\n", surface);
+    printf("  Required device extensions: %u\n", num_required_device_extensions);
+    
+    for (unsigned i = 0; i < num_required_device_extensions; i++) {
+        printf("    - %s\n", required_device_extensions[i]);
+    }
+    
+    if (gpu == VK_NULL_HANDLE) {
+        gpu = g_vk_physical_device;
+        printf("Using pre-selected physical device: %p\n", gpu);
+    }
+    
+    float queue_priority = 1.0f;
+    
+    VkDeviceQueueCreateInfo queue_create_info = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+        .queueFamilyIndex = g_vk_queue_family,
+        .queueCount = 1,
+        .pQueuePriorities = &queue_priority
+    };
+    
+    const char* base_extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    size_t total_extensions = 1 + num_required_device_extensions;
+    const char** all_extensions = SDL_malloc(sizeof(const char*) * total_extensions);
+    
+    if (!all_extensions) {
+        printf("Failed to allocate device extensions array\n");
+        return false;
+    }
+    
+    all_extensions[0] = base_extensions[0];
+    
+    for (unsigned i = 0; i < num_required_device_extensions; i++) {
+        all_extensions[1 + i] = required_device_extensions[i];
+        printf("Adding required extension: %s\n", required_device_extensions[i]);
+    }
+    
+    VkDeviceCreateInfo device_create_info = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .queueCreateInfoCount = 1,
+        .pQueueCreateInfos = &queue_create_info,
+        .enabledExtensionCount = (uint32_t)total_extensions,
+        .ppEnabledExtensionNames = all_extensions,
+        .pEnabledFeatures = required_features
+    };
+    
+    VkResult result = vkCreateDevice(gpu, &device_create_info, NULL, &g_vk_device);
+    SDL_free(all_extensions);
+    
+    if (result != VK_SUCCESS) {
+        printf("Failed to create Vulkan logical device: %d\n", result);
+        return false;
+    }
+    
+    vkGetDeviceQueue(g_vk_device, g_vk_queue_family, 0, &g_vk_queue);
+    
+    context->gpu = gpu;
+    context->device = g_vk_device;
+    context->queue = g_vk_queue;
+    context->queue_family_index = g_vk_queue_family;
+    context->presentation_queue = g_vk_queue;
+    context->presentation_queue_family_index = g_vk_queue_family;
+    
+    g_vk_interface.instance = instance;
+    g_vk_interface.gpu = gpu;
+    g_vk_interface.device = g_vk_device;
+    g_vk_interface.queue = g_vk_queue;
+    g_vk_interface.queue_index = g_vk_queue_family;
+    g_vk_interface.get_instance_proc_addr = get_instance_proc_addr;
+    g_vk_interface.get_device_proc_addr = vkGetDeviceProcAddr;
+    
+    printf("Vulkan device created successfully for core\n");
+    printf("  Device: %p\n", g_vk_device);
+    printf("  Queue: %p\n", g_vk_queue);
+    printf("  Queue Family: %u\n", g_vk_queue_family);
+    
+    return true;
+}
+
+static const VkApplicationInfo* get_application_info(void) {
+    static VkApplicationInfo app_info = {
+        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pApplicationName = "sdlarch",
+        .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
+        .pEngineName = "sdlarch",
+        .engineVersion = VK_MAKE_VERSION(1, 0, 0),
+        .apiVersion = VK_API_VERSION_1_0
+    };
+
+    printf("Providing application info to core\n");
+
+    return &app_info;
+}
+
+static void cleanup_vulkan() {
+    printf("Cleaning up Vulkan resources...\n");
+    
+    if (g_vk_device != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(g_vk_device);
+        vkDestroyDevice(g_vk_device, NULL);
+        g_vk_device = VK_NULL_HANDLE;
+    }
+    
+    if (g_vk_surface != VK_NULL_HANDLE) {
+        vkDestroySurfaceKHR(g_vk_instance, g_vk_surface, NULL);
+        g_vk_surface = VK_NULL_HANDLE;
+    }
+    
+    if (g_vk_instance != VK_NULL_HANDLE) {
+        vkDestroyInstance(g_vk_instance, NULL);
+        g_vk_instance = VK_NULL_HANDLE;
+    }
+    
+    g_vk_physical_device = VK_NULL_HANDLE;
+    g_vk_queue = VK_NULL_HANDLE;
+    g_vk_queue_family = 0;
+    g_vk_initialized = 0;
+    g_vk_failed = 0;
+    printf("Vulkan resources cleaned up\n");
+}
+
+static VkInstance create_vulkan_instance() {
+    VkApplicationInfo app_info = {
+        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pApplicationName = "sdlarch",
+        .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
+        .pEngineName = "sdlarch",
+        .engineVersion = VK_MAKE_VERSION(1, 0, 0),
+        .apiVersion = VK_API_VERSION_1_0
+    };
+
+    unsigned int extension_count = 0;
+    if (!SDL_Vulkan_GetInstanceExtensions(g_win, &extension_count, NULL)) {
+        printf("Failed to get Vulkan instance extension count: %s\n", SDL_GetError());
+        return VK_NULL_HANDLE;
+    }
+
+    const char **extensions = SDL_malloc(sizeof(const char *) * (extension_count + 1));
+    if (!extensions) {
+        printf("Failed to allocate extensions array\n");
+        return VK_NULL_HANDLE;
+    }
+
+    if (!SDL_Vulkan_GetInstanceExtensions(g_win, &extension_count, extensions)) {
+        printf("Failed to get Vulkan instance extensions: %s\n", SDL_GetError());
+        SDL_free(extensions);
+        return VK_NULL_HANDLE;
+    }
+
+    const char *required_extensions[] = {
+        VK_KHR_SURFACE_EXTENSION_NAME,
+        VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+        VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
+        VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
+    };
+
+    const char **all_extensions = SDL_malloc(sizeof(const char *) * (extension_count + 4));
+    for (unsigned int i = 0; i < extension_count; i++) {
+        all_extensions[i] = extensions[i];
+    }
+    for (int i = 0; i < 4; i++) {
+        all_extensions[extension_count + i] = required_extensions[i];
+    }
+
+    VkInstanceCreateInfo create_info = {
+        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .pApplicationInfo = &app_info,
+        .enabledExtensionCount = extension_count + 4,
+        .ppEnabledExtensionNames = all_extensions,
+        .enabledLayerCount = 0
+    };
+
+    VkInstance instance = VK_NULL_HANDLE;
+    VkResult result = vkCreateInstance(&create_info, NULL, &instance);
+
+    SDL_free(extensions);
+    SDL_free(all_extensions);
+
+    if (result != VK_SUCCESS) {
+        printf("Failed to create Vulkan instance: %d\n", result);
+        return VK_NULL_HANDLE;
+    }
+
+    printf("Vulkan instance created successfully\n");
+    return instance;
+}
+
+static int create_vulkan_surface() {
+    if (!SDL_Vulkan_CreateSurface(g_win, g_vk_instance, &g_vk_surface)) {
+        printf("Failed to create Vulkan surface: %s\n", SDL_GetError());
+        return 0;
+    }
+    printf("Vulkan surface created successfully\n");
+    return 1;
+}
+
+static int select_physical_device() {
+    uint32_t device_count = 0;
+    vkEnumeratePhysicalDevices(g_vk_instance, &device_count, NULL);
+    
+    if (device_count == 0) {
+        printf("No Vulkan physical devices found\n");
+        return 0;
+    }
+    
+    VkPhysicalDevice* devices = SDL_malloc(sizeof(VkPhysicalDevice) * device_count);
+    vkEnumeratePhysicalDevices(g_vk_instance, &device_count, devices);
+    
+    // Selecionar o primeiro dispositivo adequado
+    for (uint32_t i = 0; i < device_count; i++) {
+        VkPhysicalDeviceProperties props;
+        vkGetPhysicalDeviceProperties(devices[i], &props);
+        
+        printf("Found Vulkan device: %s\n", props.deviceName);
+        
+        uint32_t queue_family_count = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(devices[i], &queue_family_count, NULL);
+        
+        VkQueueFamilyProperties* queue_families = SDL_malloc(sizeof(VkQueueFamilyProperties) * queue_family_count);
+        vkGetPhysicalDeviceQueueFamilyProperties(devices[i], &queue_family_count, queue_families);
+        
+        for (uint32_t j = 0; j < queue_family_count; j++) {
+            if (queue_families[j].queueCount > 0 && 
+                (queue_families[j].queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
+                
+                VkBool32 present_support = VK_FALSE;
+                vkGetPhysicalDeviceSurfaceSupportKHR(devices[i], j, g_vk_surface, &present_support);
+                
+                if (present_support) {
+                    g_vk_physical_device = devices[i];
+                    g_vk_queue_family = j;
+                    SDL_free(queue_families);
+                    SDL_free(devices);
+                    printf("Selected Vulkan device: %s (queue family %u)\n", props.deviceName, j);
+                    return 1;
+                }
+            }
+        }
+        
+        SDL_free(queue_families);
+    }
+    
+    SDL_free(devices);
+    printf("No suitable Vulkan device found\n");
+    return 0;
+}
+
+static const struct retro_hw_render_context_negotiation_interface_vulkan g_vk_negotiation_interface = {
+    RETRO_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_VULKAN,
+    RETRO_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_VULKAN_VERSION,
+    get_application_info, // get_application_info
+    create_device, // create_device
+    NULL, // get_physical_device_extensions
+};
+
+static void init_vulkan_interface() {
+    printf("Initializing Vulkan interface...\n");
+    
+    if (g_vk_failed) {
+        printf("Vulkan previously failed, skipping\n");
+        return;
+    }
+    
+    if (g_vk_instance == VK_NULL_HANDLE) {
+        g_vk_instance = create_vulkan_instance();
+        if (g_vk_instance == VK_NULL_HANDLE) {
+            printf("Failed to create Vulkan instance\n");
+            g_vk_failed = 1;
+            return;
+        }
+    }
+    
+    if (g_vk_surface == VK_NULL_HANDLE) {
+        if (!create_vulkan_surface()) {
+            printf("Failed to create Vulkan surface\n");
+            g_vk_failed = 1;
+            return;
+        }
+    }
+    
+    if (g_vk_physical_device == VK_NULL_HANDLE) {
+        if (!select_physical_device()) {
+            printf("Failed to select Vulkan physical device\n");
+            g_vk_failed = 1;
+            return;
+        }
+    }
+    
+    
+    g_vk_interface.instance = g_vk_instance;
+    g_vk_interface.gpu = g_vk_physical_device;
+    g_vk_interface.get_instance_proc_addr = vkGetInstanceProcAddr;
+    g_vk_interface.get_device_proc_addr = vkGetDeviceProcAddr;
+    
+    g_vk_interface.device = VK_NULL_HANDLE;
+    g_vk_interface.queue = VK_NULL_HANDLE;
+    g_vk_interface.queue_index = g_vk_queue_family;
+    
+    g_vk_initialized = 1;
+    printf("Vulkan interface initialized successfully (waiting for core to create device)\n");
+}
+
+#endif
+
 struct EnvVariable s_envVariables[] = {
 	{ "pcsx2_enable_hw_hacks", "enabled" },
-	{ "pcsx2_renderer", "Hardware" },
+	{ "pcsx2_renderer", "Vulkan" },
 	{ "pcsx2_software_clut_render", "Normal" },
 	{ "pcsx2_fastboot", "enabled" },
     { "pcsx2_blending_accuracy", "Medium" },
@@ -190,7 +539,7 @@ struct EnvVariable s_envVariables[] = {
 	{ "dolphin_log_level", "Info" },
 	{ "dolphin_cpu_clock_rate", "100%" },
     { "dolphin_enable_rumble", "disabled" },
-	// { "dolphin_renderer", "Software" },
+    { "dolphin_renderer", "Hardware" },
 	// { "dolphin_fastmem", "disabled" },
 	// { "dolphin_dsp_hle", "enabled" },
 	// { "dolphin_dsp_jit", "enabled" },
@@ -205,8 +554,8 @@ struct EnvVariable s_envVariables[] = {
 	// { "dolphin_mixer_rate", "32000" },
 	{ "dolphin_shader_compilation_mode", "sync" },
 	// { "dolphin_max_anisotropy", "0" },
-	{ "dolphin_efb_scaled_copy", "enabled" },
-	{ "dolphin_efb_to_texture", "enabled" },
+	{ "dolphin_efb_scaled_copy", "disabled" },
+	{ "dolphin_efb_to_texture", "disabled" },
 	// { "dolphin_efb_to_vram", "disabled" },
 	// { "dolphin_fast_depth_calculation", "disabled" },
 	// { "dolphin_bbox_enabled", "disabled" },
@@ -502,6 +851,10 @@ static void create_vulkan_window(int width, int height) {
     }
     
     printf("Vulkan window created successfully\n");
+
+#ifdef HAS_VULKAN
+    init_vulkan_interface();
+#endif
 }
 
 static void resize_to_aspect(double ratio, int sw, int sh, int *dw, int *dh) {
@@ -529,8 +882,13 @@ static void video_configure(const struct retro_game_geometry *geom) {
 	// nheight *= g_scale;
 
 	if (!g_win)
+#ifndef HAS_VULKAN
 		create_window(nwidth, nheight);
+#else
+        create_vulkan_window(nwidth, nheight); 
+#endif
 
+#ifndef HAS_VULKAN
 	if (g_video.tex_id)
 		glDeleteTextures(1, &g_video.tex_id);
 
@@ -538,8 +896,11 @@ static void video_configure(const struct retro_game_geometry *geom) {
 
 	if (!g_video.pixfmt)
 		g_video.pixfmt = GL_UNSIGNED_SHORT_5_5_5_1;
+#endif
 
     SDL_SetWindowSize(g_win, nwidth, nheight);
+
+#ifndef HAS_VULKAN
 
 	glGenTextures(1, &g_video.tex_id);
 
@@ -573,6 +934,10 @@ static void video_configure(const struct retro_game_geometry *geom) {
 	g_video.clip_h = geom->base_height;
 
 	refresh_vertex_data();
+
+#else
+     printf("Vulkan configuration completed - core handles everything\n");
+#endif
 
     // TODO: make the same in sdlarch-rl
     if (g_video.hw.context_reset) {
@@ -835,6 +1200,9 @@ static int key_exists(const char* key) {
 }
 
 static bool core_environment(unsigned cmd, void *data) {
+
+    printf("cmd >>>>>>> %d \n", cmd);
+
 	switch (cmd) {
     case RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE:
         return false;
@@ -847,6 +1215,14 @@ static bool core_environment(unsigned cmd, void *data) {
     // case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS: {
     //     return true;
     // }
+
+    case RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO: {
+        struct retro_system_av_info* av_info = (struct retro_system_av_info*)data;
+        printf("AV_INFO: %dx%d @ %.2f FPS >>>>>>>>>>>>>>>>>>>>>>>>>>>>> \n", 
+               av_info->geometry.base_width, av_info->geometry.base_height,
+               av_info->timing.fps);
+        return true;
+    }
 
     case RETRO_ENVIRONMENT_SET_VARIABLES: {
         const struct retro_variable *vars = (const struct retro_variable *)data;
@@ -966,7 +1342,7 @@ static bool core_environment(unsigned cmd, void *data) {
 		return video_set_pixel_format(*fmt);
 	}
 
-#ifdef _WIN32
+#ifdef HAS_VULKAN
     case RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER: {
         unsigned* context_type = (unsigned*)data;
         *context_type = RETRO_HW_CONTEXT_VULKAN;
@@ -977,10 +1353,50 @@ static bool core_environment(unsigned cmd, void *data) {
     case RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE: {
         struct retro_hw_render_interface** interface = (struct retro_hw_render_interface**)data;
         
-        printf("Providing Vulkan interface to core\n");
+        printf("Core requesting Vulkan hardware render interface\n");
         
-        if (*interface == NULL || (*interface)->interface_type == RETRO_HW_RENDER_INTERFACE_VULKAN) {
+        if (!g_vk_initialized && !g_vk_failed) {
+            printf("Vulkan not initialized yet, initializing now...\n");
+            init_vulkan_interface();
+        }
+        
+        if (g_vk_initialized && interface) {
             *interface = (struct retro_hw_render_interface*)&g_vk_interface;
+            printf("Vulkan interface provided to core successfully\n");
+            return true;
+        } else {
+            printf("Cannot provide Vulkan interface (initialized: %d, failed: %d)\n", 
+                   g_vk_initialized, g_vk_failed);
+            return false;
+        }
+    }
+
+    case RETRO_ENVIRONMENT_SET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE: {
+        const struct retro_hw_render_context_negotiation_interface* iface = 
+            (const struct retro_hw_render_context_negotiation_interface*)data;
+        
+        printf("Core setting hardware render context negotiation interface\n");
+        printf("  Interface type: %u\n", iface->interface_type);
+        printf("  Interface version: %u\n", iface->interface_version);
+        
+        if (iface->interface_type == RETRO_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_VULKAN) {
+            const struct retro_hw_render_context_negotiation_interface_vulkan* vk_iface =
+                (const struct retro_hw_render_context_negotiation_interface_vulkan*)iface;
+            
+            printf("Vulkan negotiation interface provided by core\n");
+            
+            if (vk_iface->get_application_info) {
+                printf("Core provided get_application_info - will use core's function\n");
+            } else {
+                printf("Core did not provide get_application_info - will use ours\n");
+            }
+            
+            if (vk_iface->create_device) {
+                printf("Core provided create_device - will use core's function\n");
+            } else {
+                printf("Core did not provide create_device - will use ours\n");
+            }
+            
             return true;
         }
         
@@ -990,9 +1406,23 @@ static bool core_environment(unsigned cmd, void *data) {
 
     case RETRO_ENVIRONMENT_SET_HW_RENDER: {
         struct retro_hw_render_callback *hw = (struct retro_hw_render_callback*)data;
-#ifdef _WIN32
-        printf("Core wants Vulkan context\n");
-        hw->context_type = RETRO_HW_CONTEXT_VULKAN;
+#ifdef HAS_VULKAN
+        if (hw->context_type == RETRO_HW_CONTEXT_VULKAN) {
+            printf("Core configured for Vulkan rendering\n");
+            
+            if (!g_vk_initialized && !g_vk_failed) {
+                init_vulkan_interface();
+            }
+
+            
+            if (g_vk_initialized) {
+                printf("Vulkan ready for core\n");
+            } else {
+                printf("WARNING: Vulkan not ready but core requested it\n");
+            }
+            
+            return true;
+        }
 #else
         hw->get_current_framebuffer = core_get_current_framebuffer;
         hw->get_proc_address = (retro_hw_get_proc_address_t)SDL_GL_GetProcAddress;
@@ -1026,7 +1456,9 @@ static bool core_environment(unsigned cmd, void *data) {
 
         // some cores call this before we even have a window
         if (g_win) {
+#ifndef HAS_VULKAN
             refresh_vertex_data();
+#endif
 
             int ow = 0, oh = 0;
             resize_to_aspect(geom->aspect_ratio, geom->base_width, geom->base_height, &ow, &oh);
@@ -1056,16 +1488,42 @@ static bool core_environment(unsigned cmd, void *data) {
     return false;
 }
 
-#ifdef _WIN32
+#ifdef HAS_VULKAN
 static void video_refresh_vulkan(const void* data, unsigned width, unsigned height, unsigned pitch) {
     static int frame_count = 0;
-    printf("Vulkan frame %d - core handles everything\n", frame_count++);
+    // printf("Vulkan frame %d - core handles everything\n", frame_count++);
+    if (!g_vk_initialized) {
+        // Se Vulkan não foi inicializado pelo core, apenas contamos os frames
+        printf("Vulkan frame %d - waiting for core initialization\n", frame_count++);
+        return;
+    }
+
+    if (data == RETRO_HW_FRAME_BUFFER_VALID) {
+        printf("HARDWARE FRAME - %ux%u\n", width, height);
+    } 
+    else if (data && data != RETRO_HW_FRAME_BUFFER_VALID) {
+        printf("SOFTWARE FRAME - %ux%u, pitch: %u\n", width, height, pitch);
+        
+        if (width > 0 && height > 0) {
+            printf(">>> FIRST SOFTWARE FRAME RECEIVED! <<<\n");
+            // process_software_frame(data, width, height, pitch);
+        }
+    }
+    else {
+        printf("NULL frame\n");
+    }
+
+    SDL_Event redraw_event;
+    redraw_event.type = SDL_WINDOWEVENT;
+    redraw_event.window.event = SDL_WINDOWEVENT_EXPOSED;
+    SDL_PushEvent(&redraw_event);
 }
 #endif
 
 
 static void core_video_refresh(const void *data, unsigned width, unsigned height, size_t pitch) {
-#ifdef _WIN32
+static int frame_count = 0;
+#ifdef HAS_VULKAN
     video_refresh_vulkan(data, width, height, pitch);
 #else
     video_refresh(data, width, height, pitch);
@@ -1240,8 +1698,8 @@ int main(int argc, char *argv[]) {
     if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO|SDL_INIT_EVENTS) < 0)
         die("Failed to initialize SDL");
 
-#ifdef _WIN32
-    create_vulkan_window(1280, 720);
+#ifdef HAS_VULKAN
+    create_vulkan_window(640, 480);
 #else
 
     SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
@@ -1297,20 +1755,32 @@ int main(int argc, char *argv[]) {
                 switch (ev.window.event) {
                 case SDL_WINDOWEVENT_CLOSE: running = false; break;
                 case SDL_WINDOWEVENT_RESIZED:
-                    resize_cb(ev.window.data1, ev.window.data2);
+                    // resize_cb(ev.window.data1, ev.window.data2);
+                    break;
+                case SDL_WINDOWEVENT_EXPOSED:
+                    // Redesenhar a janela quando necessário
+                    printf("Window exposed, forcing redraw\n");
                     break;
                 }
             }
         }
 
+#ifndef HAS_VULKAN
         SDL_GL_MakeCurrent(g_win, g_ctx);
+#endif
         // glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        printf("before retro_run\n");
 		g_retro.retro_run();
+        printf("after retro_run\n");
 	}
 
 	core_unload();
 	audio_deinit();
-	video_deinit();
+#ifdef HAS_VULKAN
+    cleanup_vulkan();
+#else
+    video_deinit();
+#endif
 
     if (g_vars) {
         for (const struct retro_variable *v = g_vars; v->key; ++v) {
