@@ -1,0 +1,19 @@
+{
+  "version": "0.2.1",
+  "defaults": {},
+  "configurations": [
+    {
+      "args": [
+        "pcsx2_libretro.dll",
+        "..\\sdlarch-rl\\sdlarch_rl\\roms\\GranTurismo3-Ps2\\rom.iso"
+      ],
+      "currentDir": "${workspaceRoot}",
+      "env": {},
+      "name": "sdlarch.exe",
+      "project": "CMakeLists.txt",
+      "projectTarget": "sdlarch.exe",
+      "stopAtEntry": false,
+      "type": "default"
+    }
+  ]
+}
