@@ -5,8 +5,7 @@
 #include <windows.h>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_win32.h>
-#include "vulkan_common.h"
-#include "vulkan_interface.h"
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,9 +17,6 @@
 #include <excpt.h>
 
 
-static struct vulkan_context g_ctx;
-static bool g_vulkan_initialized = false;
-
 static SDL_Window *g_win = NULL;
 static SDL_AudioDeviceID g_pcm = 0;
 static struct retro_frame_time_callback runloop_frame_time;
@@ -28,124 +24,10 @@ static retro_usec_t runloop_frame_time_last = 0;
 static const uint8_t *g_kbd = NULL;
 static struct retro_audio_callback audio_callback;
 
-const int MAX_FRAMES_IN_FLIGHT = 2;
-
-#ifdef NDEBUG
-const bool enableValidationLayers = false;
-#else
-const bool enableValidationLayers = true;
-#endif
 
 static struct {
     struct retro_hw_render_callback hw;
 } g_video  = {};
-
-struct VulkanState {
-    VkInstance instance;
-    VkDebugUtilsMessengerEXT debugMessenger;
-
-    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-    VkDevice device;
-
-    VkQueue graphicsQueue;
-    VkQueue presentQueue;
-
-    VkSwapchainKHR swapchain;
-    std::vector<VkImage> swapchainImages;
-    VkFormat swapchainImageFormat;
-    VkExtent2D swapchainExtent;
-    std::vector<VkImageView> swapchainImageViews;
-    std::vector<VkFramebuffer> swapchainFramebuffers;
-
-    VkRenderPass renderPass;
-    VkPipelineLayout pipelineLayout;
-    VkPipeline graphicsPipeline;
-    
-    VkImage textureImage;
-    VkDeviceMemory textureImageMemory;
-    VkImageView textureImageView;
-    VkSampler textureSampler;
-
-
-    VkPhysicalDeviceProperties physicalDeviceProperties;
-    VkPhysicalDeviceFeatures physicalDeviceFeatures;
-    VkPhysicalDeviceMemoryProperties memoryProperties;
-    
-    uint32_t graphicsQueueFamily;
-    uint32_t presentQueueFamily;
-    
-    // Swapchain
-    VkSurfaceKHR surface;
-    VkSurfaceCapabilitiesKHR surfaceCapabilities;
-    VkSurfaceFormatKHR surfaceFormat;
-    VkPresentModeKHR presentMode;
-    
-    // Command buffers
-    std::vector<VkCommandBuffer> commandBuffers;
-    VkCommandPool commandPool;
-    
-    // Synchronization
-    std::vector<VkSemaphore> imageAvailableSemaphores;
-    std::vector<VkSemaphore> renderFinishedSemaphores;
-    std::vector<VkFence> inFlightFences;
-    
-    // Frame management
-    uint32_t currentFrame;
-    uint32_t imageIndex;
-    
-    // Core interface
-    const retro_hw_render_interface_vulkan* core_vulkan_iface;
-    retro_vulkan_context core_vulkan_context;
-    retro_vulkan_image core_hw_image;
-    bool core_frame_is_hw;
-};
-
-VulkanState g_vk;
-
-namespace Vk {
-    static const VkApplicationInfo* GetApplicationInfo(void) {
-        static VkApplicationInfo app_info = {VK_STRUCTURE_TYPE_APPLICATION_INFO};
-        app_info.pApplicationName = "sdlarch";
-        app_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-        app_info.pEngineName = "sdlarch";
-        app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-        app_info.apiVersion = VK_API_VERSION_1_0;
-        return &app_info;
-    }
-
-    static bool CreateDevice(retro_vulkan_context* context, 
-                           VkInstance instance, 
-                           VkPhysicalDevice gpu,
-                           VkSurfaceKHR surface, 
-                           PFN_vkGetInstanceProcAddr get_instance_proc_addr,
-                           const char** required_device_extensions,
-                           unsigned num_required_device_extensions,
-                           const char** required_device_layers, 
-                           unsigned num_required_device_layers,
-                           const VkPhysicalDeviceFeatures* required_features) {
-        printf("[VULKAN] CreateDevice called by core >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> \n");
-        
-        // Use os recursos que já criamos
-        context->gpu = g_vk.physicalDevice;
-        context->device = g_vk.device;
-        context->queue = g_vk.graphicsQueue;
-        context->queue_family_index = g_vk.graphicsQueueFamily;
-        context->presentation_queue = g_vk.presentQueue;
-        context->presentation_queue_family_index = g_vk.graphicsQueueFamily;
-        
-        printf("[VULKAN] Device context provided to core\n");
-        return true;
-    }
-}
-
-static const struct retro_hw_render_context_negotiation_interface_vulkan vulkan_negotiation = {
-    RETRO_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_VULKAN,
-    RETRO_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_VULKAN_VERSION,
-    Vk::GetApplicationInfo,
-    Vk::CreateDevice,
-    NULL, // No need for destroy device
-};
-
 
 #ifdef _WIN32
 #ifdef main
@@ -294,20 +176,6 @@ static unsigned g_joy[RETRO_DEVICE_ID_JOYPAD_R3+1] = { 0 };
 	} while (0)
 #define load_retro_sym(S) load_sym(g_retro.S, S)
 
-static bool init_vulkan(SDL_Window* window) {
-    printf("=== INICIALIZANDO VULKAN (Código RetroArch) ===\n");
-    
-    if (!vulkan_context_init(&g_ctx, window)) {
-        printf("❌ Falha na inicialização do contexto Vulkan\n");
-        return false;
-    }
-    
-    vulkan_interface_init(&g_ctx);
-    g_vulkan_initialized = true;
-    
-    printf("✅ Vulkan inicializado com sucesso\n");
-    return true;
-}
 
 // vulkan render functions
 void drawFrame(const void* frame_data, unsigned width, unsigned height, size_t pitch);
@@ -706,38 +574,11 @@ static bool core_environment(unsigned cmd, void *data) {
     }
 
     case RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE: {
-        // void** interface = (void**)data;
-        // *interface = (void*)&g_vulkan_iface;
-
-        void** interface_ptr = (void**)data;
-        *interface_ptr = (void*)&g_vulkan_iface;
         printf("[ENV] Fornecendo interface Vulkan completa\n");
         return true;
     }
 
     case RETRO_ENVIRONMENT_SET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE: {
-        const struct retro_hw_render_context_negotiation_interface_vulkan *iface =
-        (const struct retro_hw_render_context_negotiation_interface_vulkan *)data;
-    
-        // if (iface->interface_type != RETRO_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_VULKAN) {
-        //     core_log(RETRO_LOG_ERROR, "Expected Vulkan context negotiation interface\n");
-        //     return false;
-        // }
-        
-        // if (iface->interface_version != RETRO_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_VULKAN_VERSION) {
-        //     core_log(RETRO_LOG_ERROR, "Vulkan context negotiation interface version mismatch\n");
-        //     return false;
-        // }
-        
-        // // Configure the vulkan context here
-        // g_vk.core_vulkan_context.gpu = g_vk.physicalDevice;
-        // g_vk.core_vulkan_context.device = g_vk.device;
-        // g_vk.core_vulkan_context.queue = g_vk.graphicsQueue;
-        // g_vk.core_vulkan_context.queue_family_index = 0; // TODO: Set the correct queue family index
-        
-        // printf("Vulkan context negotiation successful\n");
-        // iface = &vulkan_negotiation;
-
         printf("[ENV] Context negotiation interface received >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> \n");
         return true;
     }
@@ -968,12 +809,6 @@ int main(int argc, char *argv[]) {
 
     create_window(640, 480);
 
-    // printf("[2] Inicializando Vulkan...\n");
-    // if (!init_vulkan(g_win)) {
-    //     printf("[2] ❌ Vulkan falhou\n");
-    //     return 1;
-    // }
-
 
     // Load the core.
     core_load(argv[1]);
@@ -990,57 +825,34 @@ int main(int argc, char *argv[]) {
 
     SDL_Event ev;
 
-    printf("[7] === INICIANDO LOOP PRINCIPAL ===\n");
-
     int frame_count = 0;
     while (running && frame_count < 10) {
-        printf("[FRAME %d] === INÍCIO DO FRAME ===\n", frame_count);
-        
-        // 1. Processa eventos SDL (COM DEBUG)
-        printf("[FRAME %d] Processando eventos SDL...\n", frame_count);
-        
-        int events_processed = 0;
-        
+        printf("[FRAME %d] === START FRAME ===\n", frame_count);
         while (SDL_PollEvent(&ev)) {
-            printf("[FRAME %d] Evento SDL: tipo=%d\n", frame_count, ev.type);
-            
             switch (ev.type) {
                 case SDL_QUIT:
-                    printf("[FRAME %d] SDL_QUIT recebido\n", frame_count);
                     running = false;
                     break;
                 case SDL_WINDOWEVENT:
-                    printf("[FRAME %d] SDL_WINDOWEVENT: event=%d\n", 
-                        frame_count, ev.window.event);
                     break;
                 case SDL_KEYDOWN:
-                    printf("[FRAME %d] SDL_KEYDOWN: scancode=%d\n", 
-                        frame_count, ev.key.keysym.scancode);
                     break;
             }
-            events_processed++;
         }
         
-        printf("[FRAME %d] Eventos processados: %d\n", frame_count, events_processed);
-        
-        // 2. Chama o core
-        printf("[FRAME %d] Chamando retro_run...\n", frame_count);
         
         __try {
             g_retro.retro_run();
-            printf("[FRAME %d] ✅ retro_run completou\n", frame_count);
+            printf("[FRAME %d] retro_run completed\n", frame_count);
         }
         __except (EXCEPTION_EXECUTE_HANDLER) {
-            printf("[FRAME %d] ❌ EXCEÇÃO em retro_run: 0x%08X\n", 
+            printf("[FRAME %d] Exception retro_run: 0x%08X\n", 
                 frame_count, GetExceptionCode());
             break;
         }
         
-        printf("[FRAME %d] === FIM DO FRAME ===\n", frame_count);
+        printf("[FRAME %d] === END FRAME ===\n", frame_count);
         frame_count++;
-        
-        // Pequena pausa
-        SDL_Delay(16);
     }
 
 	core_unload();

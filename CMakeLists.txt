@@ -1,0 +1,181 @@
+cmake_minimum_required(VERSION 3.12)
+project(sdlarch LANGUAGES C CXX)
+
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
+    message(FATAL_ERROR "
+    WARNING: Do not build from the source folder!
+    Please use a separate build folder:
+
+    use: 
+    cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+    cmake --build build
+    ")
+endif()
+
+# Define the default build type
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_definitions(-DDEBUG)
+    message(STATUS "Debug mode: DEBUG macro defined")
+else()
+    message(STATUS "Release mode: DEBUG macro not defined")
+endif()
+
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/Debug)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/Debug)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/Debug)
+
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release)
+
+
+set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -O0")
+
+add_definitions(-DGLAD_GLAPI_EXPORT)
+add_definitions(-DGLAD_GLAPI_EXPORT_BUILD)
+
+find_package(Vulkan)
+
+if(WIN32)
+    set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    add_definitions(-D_WINDOWS -D_USRDLL)
+
+    set(SDL2_POSSIBLE_PATHS
+        "C:/SDL2"
+        "C:/Program Files/SDL2"
+        "D:/SDL2"
+        "C:/Program Files (x86)/SDL2"
+        "${CMAKE_SOURCE_DIR}/SDL2"
+        "${CMAKE_SOURCE_DIR}/../SDL2"
+    )
+    
+    find_path(SDL2_INCLUDE_DIR SDL.h
+        PATHS ${SDL2_POSSIBLE_PATHS}
+        PATH_SUFFIXES include
+    )
+    
+    find_library(SDL2_LIBRARY
+        NAMES SDL2
+        PATHS ${SDL2_POSSIBLE_PATHS}
+        PATH_SUFFIXES lib/x64 lib lib64
+    )
+    
+    if(SDL2_INCLUDE_DIR AND SDL2_LIBRARY)
+        message(STATUS "Found SDL2: ${SDL2_LIBRARY}")
+        set(SDL2_FOUND TRUE)
+    else()
+        message(FATAL_ERROR "SDL2 not found! Please install SDL2 or set SDL2_ROOT")
+    endif()
+
+else()
+    # Linux/WSL
+    find_package(SDL2 REQUIRED)
+    find_package(OpenGL REQUIRED)
+    set(SDL2_FOUND TRUE)
+endif()
+
+add_library(glad STATIC glad.c)
+set_target_properties(glad PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+)
+
+add_executable(sdlarch
+    sdlarch.cpp
+)
+
+target_include_directories(sdlarch PRIVATE
+    ${SDL2_INCLUDE_DIR}
+    .
+)
+
+
+
+target_include_directories(glad PRIVATE
+    .
+)
+
+# if(WIN32 AND Vulkan_FOUND)
+#     target_link_libraries(sdlarch Vulkan::Vulkan)
+# endif()
+
+target_compile_definitions(sdlarch PRIVATE HAS_VULKAN=1)
+
+if(WIN32)
+    target_link_libraries(sdlarch PRIVATE
+        glad  
+        ${SDL2_LIBRARY}
+        opengl32.lib
+        Vulkan::Vulkan
+    )
+
+    
+    # set_target_properties(sdlarch PROPERTIES
+    #     PREFIX ""
+    #     SUFFIX ".dll"
+    # )
+    
+else()
+    # Linux/WSL
+    target_link_libraries(sdlarch PRIVATE
+        SDL2::SDL2
+        OpenGL::GL
+        dl
+        pthread
+        glad
+        Vulkan::Vulkan
+    )
+    
+    
+    # set_target_properties(sdlarch PROPERTIES
+    #     PREFIX ""
+    #     SUFFIX ".so"
+    # )
+endif()
+
+set_source_files_properties(glad.c PROPERTIES
+    LANGUAGE C
+    C_STANDARD 11
+)
+
+message(STATUS "Platform: ${CMAKE_SYSTEM_NAME}")
+message(STATUS "Building for: ${CMAKE_SYSTEM}")
+message(STATUS "SDL2 include: ${SDL2_INCLUDE_DIR}")
+message(STATUS "SDL2 library: ${SDL2_LIBRARY}")
+
+# install(TARGETS sdlarch
+#     RUNTIME DESTINATION bin
+#     LIBRARY DESTINATION lib
+#     ARCHIVE DESTINATION lib
+# )
+
+
+# copy artifacts fn
+function(copy_artifacts_target target_name)
+    add_custom_command(TARGET ${target_name} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+            $<TARGET_FILE:${target_name}>
+            ${CMAKE_SOURCE_DIR}/
+        COMMENT "Copying ${target_name} from ${CMAKE_BUILD_TYPE} to project root"
+    )
+endfunction()
+
+# apply to both targets
+copy_artifacts_target(sdlarch)
+
+# add_custom_target(copy_all_artifacts
+#     COMMAND ${CMAKE_COMMAND} -E copy
+#         ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/${CMAKE_BUILD_TYPE}/*
+#         ${CMAKE_SOURCE_DIR}/
+#     COMMENT "Copying all artifacts to project root"
+#     DEPENDS pcsx2_headless
+# )
