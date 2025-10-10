@@ -480,9 +480,13 @@ enum retro_mod
    RETROKMOD_DUMMY = INT_MAX /* Ensure sizeof(enum) == sizeof(int) */
 };
 
+
 /* If set, this call is not part of the public libretro API yet. It can
  * change or be removed at any time. */
 #define RETRO_ENVIRONMENT_EXPERIMENTAL 0x10000
+
+#define RETRO_ENVIRONMENT_GET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_SUPPORT (73 | RETRO_ENVIRONMENT_EXPERIMENTAL)
+
 /* Environment callback to be used internally in frontend. */
 #define RETRO_ENVIRONMENT_PRIVATE 0x20000
 

@@ -6,7 +6,6 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_win32.h>
 
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,6 +22,257 @@ static struct retro_frame_time_callback runloop_frame_time;
 static retro_usec_t runloop_frame_time_last = 0;
 static const uint8_t *g_kbd = NULL;
 static struct retro_audio_callback audio_callback;
+static bool g_context_reset = false;
+
+#include <vulkan/vulkan.h>
+#include <libretro_vulkan.h>
+
+// Variáveis globais para o contexto Vulkan
+static VkInstance g_vk_instance = VK_NULL_HANDLE;
+static VkPhysicalDevice g_vk_physical_device = VK_NULL_HANDLE;
+static VkDevice g_vk_device = VK_NULL_HANDLE;
+static VkQueue g_vk_queue = VK_NULL_HANDLE;
+static uint32_t g_vk_queue_family_index = 0;
+
+// Função para obter informações da aplicação (necessária para a interface de negociação)
+static const VkApplicationInfo* GetApplicationInfo(void) {
+    printf("[VULKAN] GetApplicationInfo called\n");
+    static VkApplicationInfo app_info = {
+        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pNext = NULL,
+        .pApplicationName = "SDLArch Frontend",
+        .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
+        .pEngineName = "SDLArch",
+        .engineVersion = VK_MAKE_VERSION(1, 0, 0),
+        .apiVersion = VK_API_VERSION_1_0
+    };
+    return &app_info;
+}
+
+static const struct retro_hw_render_interface_vulkan g_vulkan_interface = {
+    RETRO_HW_RENDER_INTERFACE_VULKAN,           // interface_type
+    RETRO_HW_RENDER_INTERFACE_VULKAN_VERSION,    // interface_version  
+    GetApplicationInfo
+};
+
+// Função Create_Device para criar o dispositivo Vulkan
+static bool Create_Device(
+    retro_vulkan_context* context, 
+    VkInstance instance, 
+    VkPhysicalDevice gpu,
+    VkSurfaceKHR surface, 
+    PFN_vkGetInstanceProcAddr get_instance_proc_addr,
+    const char** required_device_extensions,
+    unsigned num_required_device_extensions,
+    const char** required_device_layers, 
+    unsigned num_required_device_layers,
+    const VkPhysicalDeviceFeatures* required_features
+) {
+    printf("[VULKAN] Create_Device called\n");
+    printf("[VULKAN] Instance: %p\n", (void*)instance);
+    printf("[VULKAN] Physical Device: %p\n", (void*)gpu);
+    printf("[VULKAN] Surface: %p\n", (void*)surface);
+    printf("[VULKAN] Required device extensions: %u\n", num_required_device_extensions);
+    
+    // Salvar instância e dispositivo físico
+    g_vk_instance = instance;
+    g_vk_physical_device = gpu;
+    
+    // Verificar se temos um dispositivo físico válido
+    if (gpu == VK_NULL_HANDLE) {
+        printf("[VULKAN] No physical device provided!\n");
+        return false;
+    }
+    
+    // Obter funções Vulkan básicas
+    PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr = 
+        (PFN_vkGetDeviceProcAddr)get_instance_proc_addr(instance, "vkGetDeviceProcAddr");
+    PFN_vkCreateDevice vkCreateDevice = 
+        (PFN_vkCreateDevice)get_instance_proc_addr(instance, "vkCreateDevice");
+    PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties = 
+        (PFN_vkGetPhysicalDeviceProperties)get_instance_proc_addr(instance, "vkGetPhysicalDeviceProperties");
+    PFN_vkGetPhysicalDeviceQueueFamilyProperties vkGetPhysicalDeviceQueueFamilyProperties = 
+        (PFN_vkGetPhysicalDeviceQueueFamilyProperties)get_instance_proc_addr(instance, "vkGetPhysicalDeviceQueueFamilyProperties");
+    
+    if (!vkCreateDevice || !vkGetDeviceProcAddr) {
+        printf("[VULKAN] Failed to get Vulkan function pointers\n");
+        return false;
+    }
+    
+    // Obter propriedades do dispositivo físico
+    VkPhysicalDeviceProperties device_props;
+    vkGetPhysicalDeviceProperties(gpu, &device_props);
+    printf("[VULKAN] Using physical device: %s\n", device_props.deviceName);
+    
+    // Encontrar família de queue adequada (graphics)
+    uint32_t queue_family_count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(gpu, &queue_family_count, NULL);
+    
+    if (queue_family_count == 0) {
+        printf("[VULKAN] No queue families available!\n");
+        return false;
+    }
+    
+    VkQueueFamilyProperties* queue_families = 
+        (VkQueueFamilyProperties*)malloc(sizeof(VkQueueFamilyProperties) * queue_family_count);
+    vkGetPhysicalDeviceQueueFamilyProperties(gpu, &queue_family_count, queue_families);
+    
+    g_vk_queue_family_index = UINT32_MAX;
+    for (uint32_t i = 0; i < queue_family_count; i++) {
+        if (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            g_vk_queue_family_index = i;
+            break;
+        }
+    }
+    
+    free(queue_families);
+    
+    if (g_vk_queue_family_index == UINT32_MAX) {
+        printf("[VULKAN] No graphics queue family found!\n");
+        return false;
+    }
+    
+    printf("[VULKAN] Using queue family index: %u\n", g_vk_queue_family_index);
+    
+    // Configurar prioridade da queue
+    float queue_priority = 1.0f;
+    VkDeviceQueueCreateInfo queue_create_info = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+        .queueFamilyIndex = g_vk_queue_family_index,
+        .queueCount = 1,
+        .pQueuePriorities = &queue_priority
+    };
+    
+    // Configurar features do dispositivo
+    VkPhysicalDeviceFeatures device_features = {0};
+    if (required_features) {
+        device_features = *required_features;
+    } else {
+        // Configurar features básicas
+        device_features.samplerAnisotropy = VK_TRUE;
+        device_features.fillModeNonSolid = VK_TRUE;
+    }
+    
+    // Configurar extensões
+    const char* device_extensions[] = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    };
+    uint32_t device_extension_count = 1;
+    
+    // Adicionar extensões requeridas pelo core
+    if (num_required_device_extensions > 0) {
+        printf("[VULKAN] Core requested %u device extensions:\n", num_required_device_extensions);
+        for (unsigned i = 0; i < num_required_device_extensions; i++) {
+            printf("  - %s\n", required_device_extensions[i]);
+        }
+        
+        // Em uma implementação real, você precisaria mesclar as extensões
+        // Aqui estamos apenas usando as básicas por simplicidade
+    }
+    
+    // Criar dispositivo lógico
+    VkDeviceCreateInfo device_create_info = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .queueCreateInfoCount = 1,
+        .pQueueCreateInfos = &queue_create_info,
+        .enabledExtensionCount = device_extension_count,
+        .ppEnabledExtensionNames = device_extensions,
+        .pEnabledFeatures = &device_features
+    };
+    
+    // Camadas (normalmente não necessárias em implementações modernas)
+    if (num_required_device_layers > 0) {
+        printf("[VULKAN] Core requested %u device layers\n", num_required_device_layers);
+        device_create_info.enabledLayerCount = num_required_device_layers;
+        device_create_info.ppEnabledLayerNames = required_device_layers;
+    } else {
+        device_create_info.enabledLayerCount = 0;
+    }
+    
+    VkResult result = vkCreateDevice(gpu, &device_create_info, NULL, &g_vk_device);
+    if (result != VK_SUCCESS) {
+        printf("[VULKAN] Failed to create logical device: %d\n", result);
+        return false;
+    }
+    
+    // Obter a queue
+    PFN_vkGetDeviceQueue vkGetDeviceQueue = 
+        (PFN_vkGetDeviceQueue)get_instance_proc_addr(instance, "vkGetDeviceQueue");
+    vkGetDeviceQueue(g_vk_device, g_vk_queue_family_index, 0, &g_vk_queue);
+    
+    // Preencher o contexto de retorno
+    context->gpu = gpu;
+    context->device = g_vk_device;
+    context->queue = g_vk_queue;
+    context->queue_family_index = g_vk_queue_family_index;
+    context->presentation_queue = g_vk_queue;
+    context->presentation_queue_family_index = g_vk_queue_family_index;
+    
+    printf("[VULKAN] Device created successfully!\n");
+    printf("[VULKAN] Logical device: %p\n", (void*)g_vk_device);
+    printf("[VULKAN] Queue: %p\n", (void*)g_vk_queue);
+    
+    return true;
+}
+
+static VkPhysicalDevice Get_Physical_Device(VkInstance instance) {
+    printf("[VULKAN] Get_Physical_Device called with instance: %p\n", (void*)instance);
+    
+    // Se já temos um dispositivo físico, retorne-o
+    if (g_vk_physical_device != VK_NULL_HANDLE) {
+        return g_vk_physical_device;
+    }
+    
+    printf("[VULKAN] No physical device set, returning NULL - core should choose\n");
+    return VK_NULL_HANDLE;
+}
+
+static bool get_vulkan_interface(void) {
+    // Esta função não pode obter a interface Vulkan aqui porque
+    // o core é que deve nos fornecer via GET_HW_RENDER_INTERFACE
+    // Vamos apenas verificar se a interface está disponível
+    // if (!g_vulkan_interface) {
+    //     printf("[VULKAN] No Vulkan interface available yet\n");
+    //     return false;
+    // }
+    
+    if (g_vulkan_interface.interface_version != RETRO_HW_RENDER_INTERFACE_VULKAN_VERSION) {
+        printf("[VULKAN] HW render interface mismatch, expected %u, got %u!\n",
+               RETRO_HW_RENDER_INTERFACE_VULKAN_VERSION, g_vulkan_interface.interface_version);
+        return false;
+    }
+    
+    printf("[VULKAN] Interface obtained successfully\n");
+    return true;
+}
+
+static void vulkan_context_reset(void) {
+    printf("[VULKAN] Context reset requested\n");
+    
+    if (get_vulkan_interface()) {
+        g_context_reset = true;
+        printf("[VULKAN] Context reset completed successfully\n");
+    } else {
+        printf("[VULKAN] Context reset failed - no Vulkan interface\n");
+    }
+}
+
+
+static void vulkan_context_destroy(void) {
+    printf("[VULKAN] Context destroy requested\n");
+    g_context_reset = false;
+    // g_vulkan_interface = NULL;
+}
+
+static const struct retro_hw_render_context_negotiation_interface_vulkan vulkan_negotiation = {
+    RETRO_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_VULKAN,
+    RETRO_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_VULKAN_VERSION,
+    GetApplicationInfo, // get_application_info
+    Create_Device, // create_device 
+    NULL,
+    NULL,
+    NULL
+};
 
 
 static struct {
@@ -219,9 +469,9 @@ static void create_window(int width, int height) {
 
     resize_cb(width, height);
 
-    if (g_video.hw.context_reset) {
-        g_video.hw.context_reset();
-    }
+    // if (g_video.hw.context_reset) {
+    //     g_video.hw.context_reset();
+    // }
 }
 
 
@@ -433,7 +683,7 @@ static int key_exists(const char* key) {
 static bool core_environment(unsigned cmd, void *data) {
 	switch (cmd) {
     case RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE:
-        return false;
+        return true;
     // case RETRO_ENVIRONMENT_GET_INPUT_DEVICE_CAPABILITIES: {
     //     uint64_t* caps = (uint64_t*)data;
     //     *caps = (1 << RETRO_DEVICE_JOYPAD);
@@ -566,28 +816,70 @@ static bool core_environment(unsigned cmd, void *data) {
 	case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: {
 		return true;
 	}
+
+    // already true, dont need to change
     case RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER: {
         unsigned* context_type = (unsigned*)data;
         *context_type = RETRO_HW_CONTEXT_VULKAN;
-        printf("Preferring Vulkan\n");
+        printf("[ENV] RETRO_HW_CONTEXT_VULKAN >>>>>>>>>> \n");
         return true;
     }
 
+    // already true, dont need to change
     case RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE: {
-        printf("[ENV] Fornecendo interface Vulkan completa\n");
+        unsigned *cb = (unsigned*)data;
+        printf("[ENV] RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE\n");
+        
+        *cb = RETRO_HW_CONTEXT_VULKAN;
+        return false;
+    }
+
+    // already true, dont need to change
+    case RETRO_ENVIRONMENT_GET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_SUPPORT:
+    {
+        printf("[ENV] RETRO_ENVIRONMENT_GET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_SUPPORT\n");
+        struct retro_hw_render_context_negotiation_interface *iface =
+                (struct retro_hw_render_context_negotiation_interface*)data;
+
+        
+        iface->interface_version = RETRO_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_VULKAN_VERSION;
         return true;
     }
 
+    // TODO Implement this
     case RETRO_ENVIRONMENT_SET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE: {
-        printf("[ENV] Context negotiation interface received >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> \n");
+        // video_driver_state_t *video_st = video_state_get_ptr();
+        const struct retro_hw_render_context_negotiation_interface** iface = 
+            (const struct retro_hw_render_context_negotiation_interface**)data;
+
+
+        // What to do here?
+        *iface = (const struct retro_hw_render_context_negotiation_interface*)&vulkan_negotiation;
+
+
         return true;
     }
 
-    case RETRO_ENVIRONMENT_SET_HW_RENDER: {
+    // TODO Implement this
+    case RETRO_ENVIRONMENT_SET_HW_RENDER:
+    case RETRO_ENVIRONMENT_SET_HW_RENDER | RETRO_ENVIRONMENT_EXPERIMENTAL: {
         struct retro_hw_render_callback *hw = (struct retro_hw_render_callback*)data;
-        printf("[ENV] SET_HW_RENDER recebido\n");
-        hw->context_type = RETRO_HW_CONTEXT_VULKAN;
-        g_video.hw = *hw;
+
+        if(hw->context_type == RETRO_HW_CONTEXT_VULKAN) {
+            printf("[ENV] SET_HW_RENDER RETRO_HW_CONTEXT_VULKAN\n");
+        } else {
+            printf("[ENV] SET_HW_RENDER received - context_type: %d\n", hw->context_type);
+        }
+        
+        // What to do here?
+        // if (hw->context_type == RETRO_HW_CONTEXT_VULKAN) {
+        //     // Configure nossos callbacks
+        //     hw->context_reset = vulkan_context_reset;
+        //     hw->context_destroy = vulkan_context_destroy;
+        //     hw->bottom_left_origin = true;
+        // }
+        
+        // g_video.hw = *hw;
         return true;
     }
     case RETRO_ENVIRONMENT_SET_FRAME_TIME_CALLBACK: {
@@ -801,11 +1093,11 @@ int main(int argc, char *argv[]) {
     if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO|SDL_INIT_EVENTS) < 0)
         die("Failed to initialize SDL");
 
+    g_video.hw.context_type = RETRO_HW_CONTEXT_VULKAN;
+    g_video.hw.context_reset = vulkan_context_reset;
+    g_video.hw.context_destroy = vulkan_context_destroy;
     g_video.hw.version_major = VK_API_VERSION_1_0;
     g_video.hw.version_minor = 0;
-    g_video.hw.context_type  = RETRO_HW_CONTEXT_VULKAN;
-    g_video.hw.context_reset   = noop;
-    g_video.hw.context_destroy = noop;
 
     create_window(640, 480);
 
