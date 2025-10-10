@@ -91,6 +91,8 @@ set_target_properties(glad PROPERTIES
 
 add_executable(sdlarch
     sdlarch.cpp
+    vulkan_common.c
+    vulkan_symbol_wrapper.c
 )
 
 target_include_directories(sdlarch PRIVATE

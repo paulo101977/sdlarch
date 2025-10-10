@@ -6,3 +6,7 @@ build/
 *.exe
 system/
 *.rvz
+*.so
+pcsx2/
+dc/
+dolphin-emu/
