@@ -1,4 +1,9 @@
+#ifndef STRING_COMMON_H
+#define STRING_COMMON_H
+
 #include <string.h>
+#include <stdbool.h>
+#include <stdlib.h>
 
 union string_list_elem_attr
 {
@@ -121,7 +126,7 @@ bool string_list_append(struct string_list *list, const char *elem,
                (list->cap > 0) ? (list->cap * 2) : 32))
       return false;
 
-   if (!(data_dup = strdup(elem)))
+   if (!(data_dup = _strdup(elem)))
       return false;
 
    list->elems[list->size].data = data_dup;
@@ -130,3 +135,4 @@ bool string_list_append(struct string_list *list, const char *elem,
    list->size++;
    return true;
 }
+#endif

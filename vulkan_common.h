@@ -13,12 +13,10 @@
 
 #define VULKAN_DIRTY_DYNAMIC_BIT                0x0001
 
-#define VULKAN_HDR_SWAPCHAIN
-
 
 #include <libretro.h>
 #include <libretro_vulkan.h>
-#include <dynamic/dylib.h>
+// #include <dynamic/dylib.h>
 
 #define VK_BUFFER_CHAIN_DISCARD(chain) \
 { \
@@ -310,9 +308,6 @@ typedef struct vulkan_context
    VkImage swapchain_images[VULKAN_MAX_SWAPCHAIN_IMAGES];
    VkFence swapchain_fences[VULKAN_MAX_SWAPCHAIN_IMAGES];
    VkFormat swapchain_format;
-#ifdef VULKAN_HDR_SWAPCHAIN
-   VkColorSpaceKHR swapchain_colour_space;
-#endif /* VULKAN_HDR_SWAPCHAIN */
 
    VkSemaphore swapchain_semaphores[VULKAN_MAX_SWAPCHAIN_IMAGES];
    VkSemaphore swapchain_acquire_semaphore;
@@ -448,8 +443,6 @@ VkDescriptorSet vulkan_descriptor_manager_alloc(
       VkDevice device,
       struct vk_descriptor_manager *manager);
 
-bool vulkan_context_init(gfx_ctx_vulkan_data_t *vk,
-      enum vulkan_wsi_type type);
 
 void vulkan_context_destroy(gfx_ctx_vulkan_data_t *vk,
       bool destroy_surface);
@@ -465,9 +458,6 @@ void vulkan_present(gfx_ctx_vulkan_data_t *vk, unsigned index);
 void vulkan_debug_mark_image(VkDevice device, VkImage image);
 void vulkan_debug_mark_memory(VkDevice device, VkDeviceMemory memory);
 
-#ifdef VULKAN_HDR_SWAPCHAIN
-bool vulkan_is_hdr10_format(VkFormat format);
-#endif /* VULKAN_HDR_SWAPCHAIN */
 
 void vulkan_initialize_render_pass(VkDevice device, VkFormat format,
       VkRenderPass *render_pass);
@@ -488,6 +478,7 @@ bool vulkan_load_device_symbols(gfx_ctx_vulkan_data_t *vk);
 bool vulkan_context_init_device(gfx_ctx_vulkan_data_t *vk);
 bool vulkan_create_swapchain(gfx_ctx_vulkan_data_t *vk,unsigned width, unsigned height,int8_t swap_interval);
 void vulkan_acquire_next_image(gfx_ctx_vulkan_data_t *vk);
+bool vulkan_context_init(gfx_ctx_vulkan_data_t *vk, enum vulkan_wsi_type type);
 #ifdef __cplusplus
 }
 #endif

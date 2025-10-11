@@ -19,7 +19,6 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <excpt.h>
-#include <vulkan/vulkan_win32.h>
 #endif
 
 #ifndef _WIN32
@@ -50,6 +49,10 @@ VkSurfaceFormatKHR surfaceFormat;//
 VkExtent2D swapchainSize;//
 vector<VkImage> swapchainImages;//
 uint32_t swapchainImageCount;//
+
+static gfx_ctx_vulkan_data_t _vk = {};
+
+static gfx_ctx_vulkan_data_t *vk = &_vk;
 
 const vector<const char*> validationLayers = {
     ///has bug
@@ -815,13 +818,13 @@ static bool core_environment(unsigned cmd, void *data) {
         return true;
     }
     // already true, dont need to change
-    case RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE: {
-        unsigned *cb = (unsigned*)data;
-        printf("[ENV] RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE\n");
+    // case RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE: {
+    //     unsigned *cb = (unsigned*)data;
+    //     printf("[ENV] RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE\n");
         
-        *cb = RETRO_HW_CONTEXT_VULKAN;
-        return false;
-    }
+    //     *cb = RETRO_HW_CONTEXT_VULKAN;
+    //     return false;
+    // }
 
     // already true, dont need to change
     case RETRO_ENVIRONMENT_GET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_SUPPORT:
@@ -854,15 +857,15 @@ static bool core_environment(unsigned cmd, void *data) {
         g_iface = iface;
         printf("[ENV] Stored Vulkan negotiation interface: %p\n", (void*)g_iface);
 
-        if(!Create_Instance()) {
-            printf("[ENV] ERROR: Failed to create Vulkan instance in SET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE\n");
-            return false;
-        }
+        // if(!Create_Instance()) {
+        //     printf("[ENV] ERROR: Failed to create Vulkan instance in SET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE\n");
+        //     return false;
+        // }
 
-        Create_Surface();
-        Select_PhysicalDevice();
-        Create_Device();
-        Create_Swapchain(false);
+        // Create_Surface();
+        // Select_PhysicalDevice();
+        // Create_Device();
+        // Create_Swapchain(false);
 
         // TODO fill vulkan_context
         // typedef struct vulkan_context
@@ -915,10 +918,8 @@ static bool core_environment(unsigned cmd, void *data) {
     //         uint8_t flags;
     //         enum vulkan_wsi_type wsi_type;
     //     } gfx_ctx_vulkan_data_t;
-        gfx_ctx_vulkan_data_t _vk = {};
 
-        gfx_ctx_vulkan_data_t *vk = &_vk;
-
+        // this create the vk->context.instance
         // TODO call vulkan_context_init
 #ifdef _WIN32
         vulkan_context_init(vk, VULKAN_WSI_WIN32);
@@ -926,18 +927,25 @@ static bool core_environment(unsigned cmd, void *data) {
         vulkan_context_init(vk, VULKAN_WSI_XLIB);
 #endif
 
-        vk->context.instance = instance;
-        vk->context.device = device;
-        vk->context.queue = graphicsQueue;
-        vk->context.gpu = physical_devices;
+        // vk->context.instance = instance;
+        // vk->context.device = device;
+        // // vk->context.queue = graphicsQueue;
+        // vk->context.queue = presentQueue;
+        // vk->context.gpu = physical_devices;
+        SDL_Vulkan_CreateSurface(g_win, vk->context.instance, &surface);
         vk->vk_surface = surface;
-        vk->swapchain = swapchain;
+        // vk->swapchain = swapchain;
 
         
-        vulkan_load_instance_symbols(vk);
+        // vulkan_load_instance_symbols(vk);
 
         vulkan_context_init_device(vk);
         vulkan_create_swapchain(vk, 640, 480, 1);
+
+        // if(g_video.hw.context_reset) {
+        //     printf("[ENV] Calling context_reset()\n");
+        //     g_video.hw.context_reset();
+        // }
         // vulkan_acquire_next_image(vk);
 
         return true;
@@ -961,7 +969,7 @@ static bool core_environment(unsigned cmd, void *data) {
         //     hw->bottom_left_origin = true;
         // }
         
-        // g_video.hw = *hw;
+        g_video.hw = *hw;
         return true;
     }
     case RETRO_ENVIRONMENT_SET_FRAME_TIME_CALLBACK: {
@@ -1185,6 +1193,11 @@ int main(int argc, char *argv[]) {
 
     create_window(640, 480);
 
+// #ifdef _WIN32
+//     vulkan_context_init(vk, VULKAN_WSI_WIN32);
+// #else
+//     vulkan_context_init(vk, VULKAN_WSI_XLIB);
+// #endif
 
     // Load the core.
     core_load(argv[1]);

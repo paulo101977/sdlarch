@@ -28,6 +28,7 @@ message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_C_STANDARD 11)
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/Debug)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/Debug)
@@ -37,9 +38,21 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release)
 
+if(MSVC)
+    # Flags para MSVC
+    add_compile_options("/Od")    # No optimization
+    add_compile_options("/Ob0")   # No inline expansion
+    add_compile_options("/GF-")   # Disable string pooling
+    add_compile_options("/Gm-")   # Disable minimal rebuild
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /DEBUG")
+else()
+    # Flags para GCC/Clang
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -O0")
+endif()
+
 add_definitions(-DNEED_DYNAMIC)
 set(CMAKE_BUILD_TYPE Debug)
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -O0")
+# set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -O0")
 set(NEED_DYNAMIC ON)
 
 add_compile_definitions(
@@ -100,12 +113,23 @@ set_target_properties(glad PROPERTIES
 add_executable(sdlarch
     sdlarch.cpp
     vulkan_common.c
-    vulkan_symbol_wrapper.c
+    libretro-common/vulkan/vulkan_symbol_wrapper.c
     # libretro-common/dynamic/dylib.c
     # libretro-common/encodings/encoding_utf.c
     # libretro-common/string/stdstring.c
     # libretro-common/file/file_path.c
 )
+
+if(MSVC)
+    set_source_files_properties(vulkan_common.c PROPERTIES 
+        COMPILE_FLAGS "/Od /Ob0 /GF- /Gm-"
+    )
+    
+    # Para todos os outros arquivos também
+    set_source_files_properties(sdlarch.cpp PROPERTIES
+        COMPILE_FLAGS "/Od /Ob0"
+    )
+endif()
 
 target_include_directories(sdlarch PRIVATE
     ${SDL2_INCLUDE_DIR}

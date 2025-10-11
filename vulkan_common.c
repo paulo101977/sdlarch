@@ -1,11 +1,13 @@
+#include "string_common.h"
+#include <SDL.h>
 #include "vulkan_common.h"
-#include "vulkan_symbol_wrapper.h"
+#include <vulkan/vulkan_symbol_wrapper.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include "string_common.h"
 #include <assert.h>
-#include <SDL.h>
+
+
 // #include <dynamic/dylib.h>
 
 #ifndef ARRAY_SIZE
@@ -14,7 +16,7 @@
 
 #define VULKAN_COLORSPACE_EXTENSION_NAME "VK_EXT_swapchain_colorspace"
 
-static dylib_t                       vulkan_library;
+static void*                       vulkan_library;
 struct retro_hw_render_context_negotiation_interface_vulkan *g_iface = NULL;
 
 enum gfx_ctx_api
@@ -368,7 +370,7 @@ bool vulkan_context_init_device(gfx_ctx_vulkan_data_t *vk)
 
    printf("g_iface >>>>>>>>>>>>>>>>>> %p\n", (void*)g_iface);
    printf("g_iface create_device >>>>>>>>>>>>>>>>>> %p\n", g_iface->create_device);
-   printf("g_iface cached_device_vk >>>>>>>>>>>>>>>>>>%d\n", cached_device_vk);
+   // printf("g_iface cached_device_vk >>>>>>>>>>>>>>>>>>%d\n", cached_device_vk);
 
    // vulkan_symbol_wrapper_init(vkGetInstanceProcAddr);
 
@@ -406,13 +408,18 @@ bool vulkan_context_init_device(gfx_ctx_vulkan_data_t *vk)
          printf("g_iface vk->context.gpu >>>>>>>>>>>>>>>>>> %p\n", vk->context.gpu);
          printf("g_iface vk->vk_surface >>>>>>>>>>>>>>>>>> %p\n", vk->vk_surface);
          printf("g_iface vk->context.instance >>>>>>>>>>>>>>>>>> %p\n", vk->context.instance);
-         printf("g_iface ARRAY_SIZE >>>>>>>>>>>>>>>>>> %d\n", ARRAY_SIZE(vulkan_device_extensions));
+         // printf("g_iface ARRAY_SIZE >>>>>>>>>>>>>>>>>> %d\n", ARRAY_SIZE(vulkan_device_extensions));
          printf("g_iface vulkan_device_extensions >>>>>>>>>>>>>>>>>> %s\n", vulkan_device_extensions[0]);
+
+         vulkan_symbol_wrapper_init(vkGetInstanceProcAddr);
+         PFN_vkGetInstanceProcAddr fn = vulkan_symbol_wrapper_instance_proc_addr();
+
+         printf("g_iface vk->context.instance >>>>>>>>>>>>>>>>>> %p\n", fn);
 
          ret = g_iface->create_device(&context, vk->context.instance,
                vk->context.gpu,
                vk->vk_surface,
-               vulkan_symbol_wrapper_instance_proc_addr(),
+               fn,
                vulkan_device_extensions,
                ARRAY_SIZE(vulkan_device_extensions),
                NULL,
@@ -470,17 +477,17 @@ bool vulkan_context_init_device(gfx_ctx_vulkan_data_t *vk)
 
    printf("[Vulkan] Using GPU: \"%s\".\n", vk->context.gpu_properties.deviceName);
 
-   {
-      char version_str[128];
-      size_t _len            = snprintf(version_str      , sizeof(version_str)      , "%u", VK_VERSION_MAJOR(vk->context.gpu_properties.apiVersion));
-      version_str[  _len]    = '.';
-      version_str[++_len]    = '\0';
-      _len                  += snprintf(version_str + _len, sizeof(version_str) - _len, "%u", VK_VERSION_MINOR(vk->context.gpu_properties.apiVersion));
-      version_str[  _len]    = '.';
-      version_str[++_len]    = '\0';
-      snprintf(version_str + _len, sizeof(version_str) - _len, "%u", VK_VERSION_PATCH(vk->context.gpu_properties.apiVersion));
-      video_driver_set_gpu_api_version_string(version_str);
-   }
+   // {
+   //    char version_str[128];
+   //    size_t _len            = snprintf(version_str      , sizeof(version_str)      , "%u", VK_VERSION_MAJOR(vk->context.gpu_properties.apiVersion));
+   //    version_str[  _len]    = '.';
+   //    version_str[++_len]    = '\0';
+   //    _len                  += snprintf(version_str + _len, sizeof(version_str) - _len, "%u", VK_VERSION_MINOR(vk->context.gpu_properties.apiVersion));
+   //    version_str[  _len]    = '.';
+   //    version_str[++_len]    = '\0';
+   //    snprintf(version_str + _len, sizeof(version_str) - _len, "%u", VK_VERSION_PATCH(vk->context.gpu_properties.apiVersion));
+   //    video_driver_set_gpu_api_version_string(version_str);
+   // }
 
    printf("LINE %d\n", __LINE__);
    if (vk->context.device == VK_NULL_HANDLE)
@@ -1177,19 +1184,6 @@ static VkInstance vulkan_context_create_instance_wrapper(void *opaque, const VkI
       goto end;
    }
 
-#ifdef VULKAN_HDR_SWAPCHAIN
-   /* Check if HDR colorspace extension was enabled */
-   vk->context.flags &= ~VK_CTX_FLAG_HDR_SUPPORT;
-   for (i = 0; i < info.enabledExtensionCount; i++)
-   {
-      if (string_is_equal(instance_extensions[i], VULKAN_COLORSPACE_EXTENSION_NAME))
-      {
-         vk->context.flags |= VK_CTX_FLAG_HDR_SUPPORT;
-         break;
-      }
-   }
-#endif
-
    if (info.pApplicationInfo)
    {
       uint32_t supported_instance_version = VK_API_VERSION_1_0;
@@ -1252,8 +1246,6 @@ bool vulkan_context_init(gfx_ctx_vulkan_data_t *vk,
          vulkan_library = SDL_LoadObject("libvulkan.so");
 #endif
    }
-
-   printf("[Vulkan] Failed to load symbol vkGetInstanceProcAddr: %s\n", SDL_GetError());
 
    if (!vulkan_library)
    {
