@@ -18,6 +18,7 @@
 
 #include <libretro.h>
 #include <libretro_vulkan.h>
+#include <dynamic/dylib.h>
 
 #define VK_BUFFER_CHAIN_DISCARD(chain) \
 { \
@@ -461,12 +462,6 @@ bool vulkan_surface_create(gfx_ctx_vulkan_data_t *vk,
 
 void vulkan_present(gfx_ctx_vulkan_data_t *vk, unsigned index);
 
-void vulkan_acquire_next_image(gfx_ctx_vulkan_data_t *vk);
-
-bool vulkan_create_swapchain(gfx_ctx_vulkan_data_t *vk,
-      unsigned width, unsigned height,
-      int8_t swap_interval);
-
 void vulkan_debug_mark_image(VkDevice device, VkImage image);
 void vulkan_debug_mark_memory(VkDevice device, VkDeviceMemory memory);
 
@@ -486,10 +481,13 @@ RETRO_END_DECLS
 #ifdef __cplusplus
 extern "C" {
 #endif
+static VkInstance   cached_instance_vk;
 extern struct retro_hw_render_context_negotiation_interface_vulkan *g_iface;
 bool vulkan_load_instance_symbols(gfx_ctx_vulkan_data_t *vk);
 bool vulkan_load_device_symbols(gfx_ctx_vulkan_data_t *vk);
 bool vulkan_context_init_device(gfx_ctx_vulkan_data_t *vk);
+bool vulkan_create_swapchain(gfx_ctx_vulkan_data_t *vk,unsigned width, unsigned height,int8_t swap_interval);
+void vulkan_acquire_next_image(gfx_ctx_vulkan_data_t *vk);
 #ifdef __cplusplus
 }
 #endif

@@ -44,11 +44,43 @@ uint32_t present_QueueFamilyIndex;
 VkQueue graphicsQueue;
 VkQueue presentQueue;
 VkSurfaceKHR surface;
+VkSwapchainKHR swapchain;//
+VkSurfaceCapabilitiesKHR surfaceCapabilities;//
+VkSurfaceFormatKHR surfaceFormat;//
+VkExtent2D swapchainSize;//
+vector<VkImage> swapchainImages;//
+uint32_t swapchainImageCount;//
 
 const vector<const char*> validationLayers = {
     ///has bug
     //"VK_LAYER_LUNARG_standard_validation"
 };
+
+VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats)
+{
+    for (const auto& availableFormat : availableFormats)
+    {
+        if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+        {
+            return availableFormat;
+        }
+    }
+
+    return availableFormats[0];
+}
+
+VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes)
+{
+    for (const auto& availablePresentMode : availablePresentModes)
+    {
+        if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR)
+        {
+            return availablePresentMode;
+        }
+    }
+
+    return VK_PRESENT_MODE_FIFO_KHR;
+}
 
 void Create_Surface()
 {
@@ -139,6 +171,83 @@ void Create_Device()
 
     vkGetDeviceQueue(device, graphics_QueueFamilyIndex, 0, &graphicsQueue);
     vkGetDeviceQueue(device, present_QueueFamilyIndex, 0, &presentQueue);
+}
+
+#define CLAMP(x, lo, hi)    ((x) < (lo) ? (lo) : (x) > (hi) ? (hi) : (x))
+bool Create_Swapchain(bool resize)
+{
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_devices, surface, &surfaceCapabilities);
+
+    vector<VkSurfaceFormatKHR> surfaceFormats;
+    uint32_t formatCount;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(physical_devices, surface, &formatCount, nullptr);
+
+    if (formatCount != 0)
+    {
+        surfaceFormats.resize(formatCount);
+        vkGetPhysicalDeviceSurfaceFormatsKHR(physical_devices, surface, &formatCount, surfaceFormats.data());
+    }
+
+    vector<VkPresentModeKHR> presentModes;
+    uint32_t presentModeCount;
+    vkGetPhysicalDeviceSurfacePresentModesKHR(physical_devices, surface, &presentModeCount, nullptr);
+
+    if (presentModeCount != 0)
+    {
+        presentModes.resize(presentModeCount);
+        vkGetPhysicalDeviceSurfacePresentModesKHR(physical_devices, surface, &presentModeCount, presentModes.data());
+    }
+
+    surfaceFormat = chooseSwapSurfaceFormat(surfaceFormats);
+    VkPresentModeKHR presentMode = chooseSwapPresentMode(presentModes);
+
+    int width,height = 0;
+    SDL_Vulkan_GetDrawableSize(g_win, &width, &height);
+    width = CLAMP(width, surfaceCapabilities.minImageExtent.width, surfaceCapabilities.maxImageExtent.width);
+    height = CLAMP(height, surfaceCapabilities.minImageExtent.height, surfaceCapabilities.maxImageExtent.height);
+    swapchainSize.width = width;
+    swapchainSize.height = height;
+
+    uint32_t imageCount = surfaceCapabilities.minImageCount + 1;
+    if (surfaceCapabilities.maxImageCount > 0 && imageCount > surfaceCapabilities.maxImageCount) {
+        imageCount = surfaceCapabilities.maxImageCount;
+    }
+
+    VkSwapchainCreateInfoKHR createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    createInfo.surface = surface;
+
+    createInfo.minImageCount = surfaceCapabilities.minImageCount;
+    createInfo.imageFormat = surfaceFormat.format;
+    createInfo.imageColorSpace = surfaceFormat.colorSpace;
+    createInfo.imageExtent = swapchainSize;
+    createInfo.imageArrayLayers = 1;
+    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+   uint32_t queueFamilyIndices[] = {graphics_QueueFamilyIndex, present_QueueFamilyIndex};
+    if (graphics_QueueFamilyIndex != present_QueueFamilyIndex)
+    {
+        createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+        createInfo.queueFamilyIndexCount = 2;
+        createInfo.pQueueFamilyIndices = queueFamilyIndices;
+    }
+    else
+    {
+        createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    }
+
+    createInfo.preTransform = surfaceCapabilities.currentTransform;
+    createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    createInfo.presentMode = presentMode;
+    createInfo.clipped = VK_TRUE;
+
+    vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapchain);
+
+    vkGetSwapchainImagesKHR(device, swapchain, &swapchainImageCount, nullptr);
+    swapchainImages.resize(swapchainImageCount);
+    vkGetSwapchainImagesKHR(device, swapchain, &swapchainImageCount, swapchainImages.data());
+
+    return true;
 }
 
 static const VkApplicationInfo* GetApplicationInfo(void) {
@@ -753,6 +862,47 @@ static bool core_environment(unsigned cmd, void *data) {
         Create_Surface();
         Select_PhysicalDevice();
         Create_Device();
+        Create_Swapchain(false);
+
+        // TODO fill vulkan_context
+        // typedef struct vulkan_context
+        // {
+        //     //    slock_t *queue_lock;
+        //     retro_vulkan_destroy_device_t destroy_device;   /* ptr alignment */
+
+        //     VkInstance instance;
+        //     VkPhysicalDevice gpu;
+        //     VkDevice device;
+        //     VkQueue queue;
+
+        //     VkPhysicalDeviceProperties gpu_properties;
+        //     VkPhysicalDeviceMemoryProperties memory_properties;
+
+        //     VkPresentModeKHR present_modes[16];
+        //     VkImage swapchain_images[VULKAN_MAX_SWAPCHAIN_IMAGES];
+        //     VkFence swapchain_fences[VULKAN_MAX_SWAPCHAIN_IMAGES];
+        //     VkFormat swapchain_format;
+
+        //     VkSemaphore swapchain_semaphores[VULKAN_MAX_SWAPCHAIN_IMAGES];
+        //     VkSemaphore swapchain_acquire_semaphore;
+        //     VkSemaphore swapchain_recycled_semaphores[VULKAN_MAX_SWAPCHAIN_IMAGES];
+        //     VkSemaphore swapchain_wait_semaphores[VULKAN_MAX_SWAPCHAIN_IMAGES];
+
+
+        //     uint32_t graphics_queue_index;
+        //     uint32_t num_swapchain_images;
+        //     uint32_t current_swapchain_index;
+        //     uint32_t current_frame_index;
+
+        //     unsigned swapchain_width;
+        //     unsigned swapchain_height;
+        //     unsigned num_recycled_acquire_semaphores;
+
+        //     int8_t swap_interval;
+        //     uint8_t flags;
+
+        //     bool swapchain_fences_signalled[VULKAN_MAX_SWAPCHAIN_IMAGES];
+        // } vulkan_context_t;
         
         // TODO fill struct gfx_ctx_vulkan_data_t
     //    typedef struct gfx_ctx_vulkan_data
@@ -766,18 +916,29 @@ static bool core_environment(unsigned cmd, void *data) {
     //         enum vulkan_wsi_type wsi_type;
     //     } gfx_ctx_vulkan_data_t;
         gfx_ctx_vulkan_data_t _vk = {};
-        _vk.context.instance = instance;
-        _vk.context.device = device;
-        _vk.context.queue = graphicsQueue;
-        _vk.context.gpu = physical_devices;
-        _vk.vk_surface = surface;
 
         gfx_ctx_vulkan_data_t *vk = &_vk;
 
+        // TODO call vulkan_context_init
+#ifdef _WIN32
+        vulkan_context_init(vk, VULKAN_WSI_WIN32);
+#else
+        vulkan_context_init(vk, VULKAN_WSI_XLIB);
+#endif
+
+        vk->context.instance = instance;
+        vk->context.device = device;
+        vk->context.queue = graphicsQueue;
+        vk->context.gpu = physical_devices;
+        vk->vk_surface = surface;
+        vk->swapchain = swapchain;
+
         
-        // vulkan_load_instance_symbols(vk);
+        vulkan_load_instance_symbols(vk);
 
         vulkan_context_init_device(vk);
+        vulkan_create_swapchain(vk, 640, 480, 1);
+        // vulkan_acquire_next_image(vk);
 
         return true;
     }

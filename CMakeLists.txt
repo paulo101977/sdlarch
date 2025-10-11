@@ -37,9 +37,15 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/Release)
 
-
+add_definitions(-DNEED_DYNAMIC)
 set(CMAKE_BUILD_TYPE Debug)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -O0")
+set(NEED_DYNAMIC ON)
+
+add_compile_definitions(
+    NEED_DYNAMIC=1
+)
+
 
 add_definitions(-DGLAD_GLAPI_EXPORT)
 add_definitions(-DGLAD_GLAPI_EXPORT_BUILD)
@@ -84,6 +90,8 @@ else()
     set(SDL2_FOUND TRUE)
 endif()
 
+include_directories(${CMAKE_SOURCE_DIR}/libretro-common/include)
+
 add_library(glad STATIC glad.c)
 set_target_properties(glad PROPERTIES
     POSITION_INDEPENDENT_CODE ON
@@ -93,6 +101,10 @@ add_executable(sdlarch
     sdlarch.cpp
     vulkan_common.c
     vulkan_symbol_wrapper.c
+    # libretro-common/dynamic/dylib.c
+    # libretro-common/encodings/encoding_utf.c
+    # libretro-common/string/stdstring.c
+    # libretro-common/file/file_path.c
 )
 
 target_include_directories(sdlarch PRIVATE
@@ -106,11 +118,8 @@ target_include_directories(glad PRIVATE
     .
 )
 
-# if(WIN32 AND Vulkan_FOUND)
-#     target_link_libraries(sdlarch Vulkan::Vulkan)
-# endif()
 
-target_compile_definitions(sdlarch PRIVATE HAS_VULKAN=1)
+target_compile_definitions(sdlarch PRIVATE HAS_VULKAN=1 NEED_DYNAMIC=1)
 
 if(WIN32)
     target_link_libraries(sdlarch PRIVATE
@@ -119,13 +128,6 @@ if(WIN32)
         opengl32.lib
         Vulkan::Vulkan
     )
-
-    
-    # set_target_properties(sdlarch PROPERTIES
-    #     PREFIX ""
-    #     SUFFIX ".dll"
-    # )
-    
 else()
     # Linux/WSL
     target_link_libraries(sdlarch PRIVATE
@@ -136,12 +138,6 @@ else()
         glad
         Vulkan::Vulkan
     )
-    
-    
-    # set_target_properties(sdlarch PROPERTIES
-    #     PREFIX ""
-    #     SUFFIX ".so"
-    # )
 endif()
 
 set_source_files_properties(glad.c PROPERTIES
