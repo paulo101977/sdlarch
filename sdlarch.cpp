@@ -953,11 +953,11 @@ static bool core_environment(unsigned cmd, void *data) {
 
         // this create the vk->context.instance
         // TODO call vulkan_context_init
-#ifdef _WIN32
-        vulkan_context_init(vk, VULKAN_WSI_WIN32);
-#else
-        vulkan_context_init(vk, VULKAN_WSI_XLIB);
-#endif
+// #ifdef _WIN32
+//         vulkan_context_init(vk, VULKAN_WSI_WIN32);
+// #else
+//         vulkan_context_init(vk, VULKAN_WSI_XLIB);
+// #endif
 
         // vk->context.instance = instance;
         // vk->context.device = device;
@@ -972,6 +972,37 @@ static bool core_environment(unsigned cmd, void *data) {
         // vulkan_load_instance_symbols(vk);
 
         vulkan_context_init_device(vk);
+        if(!vulkan_load_device_symbols(vk)){
+            printf("[ENV] ERROR: vulkan_load_device_symbols() failed\n");
+            return false;
+        }
+
+        uint32_t gpu_count = 0;
+        vkEnumeratePhysicalDevices(vk->context.instance, &gpu_count, NULL);
+        printf("=== WSL GPU ENUMERATION ===\n");
+        printf("Total physical devices: %u\n", gpu_count);
+
+        std::vector<VkPhysicalDevice> gpus(gpu_count);
+        vkEnumeratePhysicalDevices(vk->context.instance, &gpu_count, gpus.data());
+
+        for (uint32_t i = 0; i < gpu_count; i++) {
+            VkPhysicalDeviceProperties props;
+            VkPhysicalDeviceFeatures features;
+            
+            vkGetPhysicalDeviceProperties(gpus[i], &props);
+            vkGetPhysicalDeviceFeatures(gpus[i], &features);
+            
+            printf("GPU %d:\n", i);
+            printf("  Handle: %p\n", gpus[i]);
+            printf("  Name: %s\n", props.deviceName);
+            printf("  Type: %d\n", props.deviceType);
+            printf("  API: %d.%d.%d\n", 
+                VK_VERSION_MAJOR(props.apiVersion),
+                VK_VERSION_MINOR(props.apiVersion),
+                VK_VERSION_PATCH(props.apiVersion));
+            printf("  Geometry Shader: %d\n", features.geometryShader);
+            printf(" ---\n");
+        }
         vulkan_create_swapchain(vk, 640, 480, 1);
         Create_ImageViews();
         Setup_DepthStencil();
@@ -1241,6 +1272,14 @@ int main(int argc, char *argv[]) {
 // #else
 //     vulkan_context_init(vk, VULKAN_WSI_XLIB);
 // #endif
+
+#ifdef _WIN32
+        vulkan_context_init(vk, VULKAN_WSI_WIN32);
+#else
+        vulkan_context_init(vk, VULKAN_WSI_XLIB);
+#endif
+
+
 
     // Load the core.
     core_load(argv[1]);

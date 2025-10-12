@@ -5,6 +5,10 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
+#ifndef _WIN32
+#define _strdup strdup
+#endif
+
 union string_list_elem_attr
 {
    bool  b;

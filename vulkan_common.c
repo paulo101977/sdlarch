@@ -464,11 +464,6 @@ bool vulkan_context_init_device(gfx_ctx_vulkan_data_t *vk)
 
    printf("LINE %d\n", __LINE__);
 
-   // PFN_vkGetDeviceProcAddr vkGetPhysicalDeviceMemoryProperties =
-   //    (PFN_vkGetDeviceProcAddr) vkGetInstanceProcAddr(vk->context.instance, "vkGetPhysicalDeviceMemoryProperties");
-   // PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties =
-   //    (PFN_vkGetPhysicalDeviceProperties) vkGetInstanceProcAddr(vk->context.instance, "vkGetPhysicalDeviceProperties");
-
    vkGetPhysicalDeviceProperties(vk->context.gpu,
          &vk->context.gpu_properties);
    vkGetPhysicalDeviceMemoryProperties(vk->context.gpu,
@@ -583,6 +578,8 @@ bool vulkan_context_init_device(gfx_ctx_vulkan_data_t *vk)
    //    printf("[Vulkan] Failed to load device symbols.\n");
    //    return false;
    // }
+
+   VULKAN_SYMBOL_WRAPPER_LOAD_INSTANCE_SYMBOL(vk->context.instance, "vkGetDeviceQueue", vkGetDeviceQueue);
 
    if (vk->context.queue == VK_NULL_HANDLE)
    {
@@ -1260,6 +1257,14 @@ bool vulkan_context_init(gfx_ctx_vulkan_data_t *vk,
 
    printf("[Vulkan] Vulkan dynamic library loaded vkGetInstanceProcAddr.\n");
 
+   PFN_vkGetDeviceProcAddr vkGetPhysicalDeviceMemoryProperties =
+      (PFN_vkGetDeviceProcAddr) vkGetInstanceProcAddr(vk->context.instance, "vkGetPhysicalDeviceMemoryProperties");
+   PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties =
+      (PFN_vkGetPhysicalDeviceProperties) vkGetInstanceProcAddr(vk->context.instance, "vkGetPhysicalDeviceProperties");
+
+   PFN_vkGetPhysicalDeviceImageFormatProperties target_func = 
+    (PFN_vkGetPhysicalDeviceImageFormatProperties)vkGetInstanceProcAddr(vk->context.instance, "vkGetPhysicalDeviceImageFormatProperties");
+    
    if (!GetInstanceProcAddr)
    {
       printf("[Vulkan] Failed to load vkGetInstanceProcAddr symbol, broken loader?\n");
@@ -1274,6 +1279,11 @@ bool vulkan_context_init(gfx_ctx_vulkan_data_t *vk,
    {
       printf("[Vulkan] Failed to load global Vulkan symbols, broken loader?\n");
       return false;
+   }
+
+   if(!vulkan_symbol_wrapper_load_core_symbols(vk->context.instance))
+   {
+      printf("[Vulkan] Failed to load core Vulkan symbols, broken loader?\n");
    }
 
    prog_name              = "sdlarch";
