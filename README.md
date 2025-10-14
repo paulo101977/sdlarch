@@ -7,6 +7,12 @@ or configuration support.
 
 ## Building
 
+Vulkan:
+```shell
+cmake -B build -S . -G "Visual Studio 17 2022" -A x64 -T ClangCL
+cmake --build build --config Release
+```
+
 Other than `make`, `pkg-config` and a working C99 or C++ compiler, you'll need
 `sdl2` development files installed.
 

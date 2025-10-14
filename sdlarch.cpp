@@ -15,6 +15,7 @@
 #include <vulkan/vulkan.h>
 #include <libretro_vulkan.h>
 #include "vulkan_common.h"
+#include <vulkan/vulkan_symbol_wrapper.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -35,9 +36,10 @@ static const uint8_t *g_kbd = NULL;
 static struct retro_audio_callback audio_callback;
 static bool g_context_reset = false;
 
+// static struct retro_hw_render_interface_vulkan _g_render_iface = {};
+static struct retro_hw_render_interface_vulkan g_render_iface = {};
 
 static gfx_ctx_vulkan_data_t _vk = {};
-
 static gfx_ctx_vulkan_data_t *vk = &_vk;
 
 VkSurfaceKHR surface;
@@ -715,6 +717,34 @@ static int key_exists(const char* key) {
     return 0;
 }
 
+static uint32_t vulkan_get_sync_index_mask(void *handle)
+{
+   return (1 << vk ->context.num_swapchain_images) - 1;
+}
+
+void vulkan_context_reset() {
+    printf("[VULKAN] vulkan_context_reset() called  ---------------->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> \n");
+}
+
+static void vulkan_lock_queue(void *handle)
+{
+//    slock_lock(vk->context.queue_lock);
+}
+
+static void vulkan_unlock_queue(void *handle)
+{
+//    slock_unlock(vk->context.queue_lock);
+}
+
+static void vulkan_wait_sync_index(void *handle) {
+
+}
+
+static uint32_t vulkan_get_sync_index(void *handle)
+{
+   return vk->context.current_frame_index;
+}
+
 static bool core_environment(unsigned cmd, void *data) {
 	switch (cmd) {
     case RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE:
@@ -859,14 +889,117 @@ static bool core_environment(unsigned cmd, void *data) {
         printf("[ENV] RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER RETRO_HW_CONTEXT_VULKAN\n");
         return true;
     }
-    // already true, dont need to change
-    // case RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE: {
-    //     unsigned *cb = (unsigned*)data;
-    //     printf("[ENV] RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE\n");
+    // TODO: implement here!!
+    case RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE: {
         
-    //     *cb = RETRO_HW_CONTEXT_VULKAN;
-    //     return false;
-    // }
+        struct retro_hw_render_interface **iface = (struct retro_hw_render_interface **)data;
+        printf("[ENV] RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE - Vulkan version\n");
+        
+       
+        *iface = (retro_hw_render_interface*)&g_render_iface;
+
+        // vulkan_init_hw_render(vk, &g_video.hw, &g_render_iface);
+
+        printf("[ENV] vulkan_init_hw_render done, interface_type: %d\n", g_render_iface.interface_type);
+        printf("[ENV] vulkan_init_hw_render done, interface_type: %d\n", g_render_iface.interface_version);
+        printf("[ENV] vulkan_init_hw_render done, interface_type: %d\n", ((retro_hw_render_interface_vulkan*)*iface) -> interface_type);
+        printf("[ENV] vulkan_init_hw_render done, interface_type: %d\n", ((retro_hw_render_interface_vulkan*)*iface) -> interface_version);
+
+        // TODO implement and mabe work!!!!
+        // (*iface)->interface_type         = RETRO_HW_RENDER_INTERFACE_VULKAN;
+        // (*iface)->interface_version      = RETRO_HW_RENDER_INTERFACE_VULKAN_VERSION;
+        // ((retro_hw_render_interface_vulkan*)*iface)->instance               = vk->context.instance; // vk->context->instance;
+        // ((retro_hw_render_interface_vulkan*)*iface)->gpu                    = vk->context.gpu;
+        // ((retro_hw_render_interface_vulkan*)*iface)->device                 = vk->context.device;
+
+        // ((retro_hw_render_interface_vulkan*)*iface)->queue                  = vk->context.queue;
+        // ((retro_hw_render_interface_vulkan*)*iface)->queue_index            = vk->context.graphics_queue_index;
+
+        // ((retro_hw_render_interface_vulkan*)*iface)->handle                 = vk;
+        // ((retro_hw_render_interface_vulkan*)*iface)->instance               = vk->context.instance; // vk->context->instance;
+        // ((retro_hw_render_interface_vulkan*)*iface)->gpu                    = vk->context.gpu;
+        // ((retro_hw_render_interface_vulkan*)*iface)->device                 = vk->context.device;
+
+        // ((retro_hw_render_interface_vulkan*)*iface)->queue                  = vk->context.queue;
+        // ((retro_hw_render_interface_vulkan*)*iface)->queue_index            = vk->context.graphics_queue_index;
+
+        // if(g_iface) {
+        //     printf("[ENV] Calling context_reset()\n");
+        //     vulkan_context_init_device(vk);
+        // }
+        
+
+        // g_render_iface->handle                 = vk;
+        // iface->set_image              = vulkan_set_image;
+        // iface->get_sync_index         = vulkan_get_sync_index;
+        // ((retro_hw_render_interface_vulkan*)*iface)->get_sync_index_mask    = vulkan_get_sync_index_mask;
+        // iface->wait_sync_index        = vulkan_wait_sync_index;
+        // iface->set_command_buffers    = vulkan_set_command_buffers;
+        // iface->lock_queue             = vulkan_lock_queue;
+        // iface->unlock_queue           = vulkan_unlock_queue;
+        // iface->set_signal_semaphore   = vulkan_set_signal_semaphore;
+
+        // ((retro_hw_render_interface_vulkan*)*iface)->get_device_proc_addr   = vkGetDeviceProcAddr;
+        // ((retro_hw_render_interface_vulkan*)*iface)->get_instance_proc_addr = vulkan_symbol_wrapper_instance_proc_addr();
+
+        // *iface = (retro_hw_render_interface*)&g_render_iface;
+
+        // if(g_iface) {
+        //     SDL_Vulkan_CreateSurface(g_win, vk->context.instance, &surface);
+        //     vk->vk_surface = surface;
+
+        //     vulkan_context_init_device(vk);
+        //     if(!vulkan_load_device_symbols(vk)){
+        //         printf("[ENV] ERROR: vulkan_load_device_symbols() failed\n");
+        //         return false;
+        //     }
+
+        //     uint32_t gpu_count = 0;
+        //     vkEnumeratePhysicalDevices(vk->context.instance, &gpu_count, NULL);
+        //     printf("=== WSL GPU ENUMERATION ===\n");
+        //     printf("Total physical devices: %u\n", gpu_count);
+
+        //     std::vector<VkPhysicalDevice> gpus(gpu_count);
+        //     vkEnumeratePhysicalDevices(vk->context.instance, &gpu_count, gpus.data());
+
+        //     for (uint32_t i = 0; i < gpu_count; i++) {
+        //         VkPhysicalDeviceProperties props;
+        //         VkPhysicalDeviceFeatures features;
+                
+        //         vkGetPhysicalDeviceProperties(gpus[i], &props);
+        //         vkGetPhysicalDeviceFeatures(gpus[i], &features);
+                
+        //         printf("GPU %d:\n", i);
+        //         printf("  Handle: %p\n", gpus[i]);
+        //         printf("  Name: %s\n", props.deviceName);
+        //         printf("  Type: %d\n", props.deviceType);
+        //         printf("  API: %d.%d.%d\n", 
+        //             VK_VERSION_MAJOR(props.apiVersion),
+        //             VK_VERSION_MINOR(props.apiVersion),
+        //             VK_VERSION_PATCH(props.apiVersion));
+        //         printf("  Geometry Shader: %d\n", features.geometryShader);
+        //         printf(" ---\n");
+        //     }
+        //     vulkan_create_swapchain(vk, 640, 480, 1);
+        //     Create_ImageViews();
+        //     Setup_DepthStencil();
+        //     Create_RenderPass();
+        //     Create_Framebuffers();
+        //     createCommandPool();
+        //     createCommandBuffers();
+        //     create_semaphores();
+            
+        //     if(g_iface -> create_device) {
+        //         printf("[ENV] Calling create_device()\n");
+        //         printf("[ENV] vk->context.swapchain_width: %d\n", vk->context.swapchain_width);
+        //         printf("[ENV] vk->context.swapchain_height: %d\n", vk->context.swapchain_height);
+        //         printf("[ENV] vk->context.swap_interval: %d\n", vk->context.swap_interval);
+        //         printf("[ENV] vk->swapchain: %p\n", vk->swapchain);
+        //         printf("[ENV] vk->context.graphics_queue_index: %d\n", vk->context.graphics_queue_index);
+        //     }
+        // }
+        return true;
+    }
 
     // already true, dont need to change
     case RETRO_ENVIRONMENT_GET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_SUPPORT:
@@ -894,12 +1027,78 @@ static bool core_environment(unsigned cmd, void *data) {
         }
 
         // What to do here?
-        // *iface = (const struct retro_hw_render_context_negotiation_interface*)&vulkan_negotiation;
-
         g_iface = iface;
+#ifdef _WIN32
+        vulkan_context_init(vk, VULKAN_WSI_WIN32);
+#else
+        vulkan_context_init(vk, VULKAN_WSI_XLIB);
+#endif
+        SDL_Vulkan_CreateSurface(g_win, vk->context.instance, &surface);
+        vk->vk_surface = surface;
+        vulkan_context_init_device(vk);
+
+
+        g_render_iface.interface_type         = RETRO_HW_RENDER_INTERFACE_VULKAN;
+        g_render_iface.interface_version      = RETRO_HW_RENDER_INTERFACE_VULKAN_VERSION;
+        g_render_iface.instance               = vk->context.instance; // vk->context->instance;
+        g_render_iface.gpu                    = vk->context.gpu;
+        g_render_iface.device                 = vk->context.device;
+
+        g_render_iface.queue                  = vk->context.queue;
+        g_render_iface.queue_index            = vk->context.graphics_queue_index;
+
+        g_render_iface.handle                 = vk;
+        g_render_iface.get_sync_index_mask = vulkan_get_sync_index_mask;
+        g_render_iface.lock_queue             = vulkan_lock_queue;
+        g_render_iface.unlock_queue           = vulkan_unlock_queue;
+        g_render_iface.wait_sync_index = vulkan_wait_sync_index;
+        g_render_iface.get_sync_index         = vulkan_get_sync_index;
+
+        g_video.hw.context_reset();
+
+        
+        
+
+        
         printf("[ENV] Stored Vulkan negotiation interface: %p\n", (void*)g_iface);
 
+        // TODO: fix and mabe work!!!!!!!!!!!!!
+        // struct retro_vulkan_context *context,
+        // VkInstance instance,
+        // VkPhysicalDevice gpu,
+        // VkSurfaceKHR surface,
+        // PFN_vkGetInstanceProcAddr get_instance_proc_addr,
+        // const char **required_device_extensions,
+        // unsigned num_required_device_extensions,
+        // const char **required_device_layers,
+        // unsigned num_required_device_layers,
+        // const VkPhysicalDeviceFeatures *required_features
+        // g_iface ->create_device(
+        //     vk->context.instance, 
+        //     vk->context.gpu, 
+        //     vk->context.graphics_queue_index, 
+        //     vk->context.swapchain_width, 
+        //     vk->context.swapchain_height, 
+        //     vk->context.swap_interval, 
+        //     vk->swapchain
+        // );
+        // vulkan_context_init_device(vk);
+
         // TODO fill vulkan_context
+        // TODO: call any functions needed to reset the vulkan context from below
+    //     static const struct retro_hw_render_context_negotiation_interface_vulkan iface = {
+    //         RETRO_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_VULKAN,
+    //         RETRO_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_VULKAN_VERSION,
+    //         Vk::GetApplicationInfo,
+    //         Vk::CreateDevice,
+    //         NULL, // destroy_device
+    // #ifdef __APPLE__
+    //         Vk::CreateInstance, // create_instance (v2 API)
+    //         NULL, // create_device2
+    // #endif
+    //     };
+
+
         // typedef struct vulkan_context
         // {
         //     //    slock_t *queue_lock;
@@ -964,62 +1163,10 @@ static bool core_environment(unsigned cmd, void *data) {
         // // vk->context.queue = graphicsQueue;
         // vk->context.queue = presentQueue;
         // vk->context.gpu = physical_devices;
-        SDL_Vulkan_CreateSurface(g_win, vk->context.instance, &surface);
-        vk->vk_surface = surface;
         // vk->swapchain = swapchain;
 
         
         // vulkan_load_instance_symbols(vk);
-
-        vulkan_context_init_device(vk);
-        if(!vulkan_load_device_symbols(vk)){
-            printf("[ENV] ERROR: vulkan_load_device_symbols() failed\n");
-            return false;
-        }
-
-        uint32_t gpu_count = 0;
-        vkEnumeratePhysicalDevices(vk->context.instance, &gpu_count, NULL);
-        printf("=== WSL GPU ENUMERATION ===\n");
-        printf("Total physical devices: %u\n", gpu_count);
-
-        std::vector<VkPhysicalDevice> gpus(gpu_count);
-        vkEnumeratePhysicalDevices(vk->context.instance, &gpu_count, gpus.data());
-
-        for (uint32_t i = 0; i < gpu_count; i++) {
-            VkPhysicalDeviceProperties props;
-            VkPhysicalDeviceFeatures features;
-            
-            vkGetPhysicalDeviceProperties(gpus[i], &props);
-            vkGetPhysicalDeviceFeatures(gpus[i], &features);
-            
-            printf("GPU %d:\n", i);
-            printf("  Handle: %p\n", gpus[i]);
-            printf("  Name: %s\n", props.deviceName);
-            printf("  Type: %d\n", props.deviceType);
-            printf("  API: %d.%d.%d\n", 
-                VK_VERSION_MAJOR(props.apiVersion),
-                VK_VERSION_MINOR(props.apiVersion),
-                VK_VERSION_PATCH(props.apiVersion));
-            printf("  Geometry Shader: %d\n", features.geometryShader);
-            printf(" ---\n");
-        }
-        vulkan_create_swapchain(vk, 640, 480, 1);
-        Create_ImageViews();
-        Setup_DepthStencil();
-        Create_RenderPass();
-        Create_Framebuffers();
-        createCommandPool();
-        createCommandBuffers();
-        create_semaphores();
-        
-        if(g_iface -> create_device) {
-            printf("[ENV] Calling create_device()\n");
-            printf("[ENV] vk->context.swapchain_width: %d\n", vk->context.swapchain_width);
-            printf("[ENV] vk->context.swapchain_height: %d\n", vk->context.swapchain_height);
-            printf("[ENV] vk->context.swap_interval: %d\n", vk->context.swap_interval);
-            printf("[ENV] vk->swapchain: %p\n", vk->swapchain);
-            printf("[ENV] vk->context.graphics_queue_index: %d\n", vk->context.graphics_queue_index);
-        }
        
 
         return true;
@@ -1042,6 +1189,8 @@ static bool core_environment(unsigned cmd, void *data) {
         //     hw->context_destroy = vulkan_context_destroy;
         //     hw->bottom_left_origin = true;
         // }
+
+        // hw->context_reset = vulkan_context_reset;
         
         g_video.hw = *hw;
         return true;
@@ -1065,7 +1214,7 @@ static bool core_environment(unsigned cmd, void *data) {
     }
     case RETRO_ENVIRONMENT_SET_GEOMETRY: {
         struct retro_game_geometry *geom = (struct retro_game_geometry*)data;
-        printf("[ENV] RETRO_ENVIRONMENT_SET_GEOMETRY\n");
+        printf("[ENV] RETRO_ENVIRONMENT_SET_GEOMETRY ------------------------------>>>>>>>>>>> \n");
         return true;
     }
     case RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME: {
@@ -1259,7 +1408,7 @@ int main(int argc, char *argv[]) {
     if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO|SDL_INIT_EVENTS) < 0)
         die("Failed to initialize SDL");
 
-    // g_video.hw.context_type = RETRO_HW_CONTEXT_VULKAN;
+    g_video.hw.context_type = RETRO_HW_CONTEXT_VULKAN;
     // g_video.hw.context_reset = vulkan_context_reset;
     // g_video.hw.context_destroy = vulkan_context_destroy;
     // g_video.hw.version_major = VK_API_VERSION_1_0;
@@ -1273,11 +1422,6 @@ int main(int argc, char *argv[]) {
 //     vulkan_context_init(vk, VULKAN_WSI_XLIB);
 // #endif
 
-#ifdef _WIN32
-        vulkan_context_init(vk, VULKAN_WSI_WIN32);
-#else
-        vulkan_context_init(vk, VULKAN_WSI_XLIB);
-#endif
 
 
 

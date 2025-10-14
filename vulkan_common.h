@@ -479,6 +479,7 @@ bool vulkan_context_init_device(gfx_ctx_vulkan_data_t *vk);
 bool vulkan_create_swapchain(gfx_ctx_vulkan_data_t *vk,unsigned width, unsigned height,int8_t swap_interval);
 void vulkan_acquire_next_image(gfx_ctx_vulkan_data_t *vk);
 bool vulkan_context_init(gfx_ctx_vulkan_data_t *vk, enum vulkan_wsi_type type);
+void vulkan_init_hw_render(gfx_ctx_vulkan_data_t *vk, struct retro_hw_render_callback *hwr, struct retro_hw_render_interface_vulkan **iface);
 #ifdef __cplusplus
 }
 #endif

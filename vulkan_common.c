@@ -1374,6 +1374,72 @@ bool vulkan_context_init(gfx_ctx_vulkan_data_t *vk,
    return true;
 }
 
+// static void vulkan_set_image(void *handle,
+//       const struct retro_vulkan_image *image,
+//       uint32_t num_semaphores,
+//       const VkSemaphore *semaphores,
+//       uint32_t src_queue_family)
+// {
+//    gfx_ctx_vulkan_data_t *vk              = (gfx_ctx_vulkan_data_t*)handle;
+
+//    vk->hw.image          = image;
+//    vk->hw.num_semaphores = num_semaphores;
+
+//    if (num_semaphores > 0)
+//    {
+//       int i;
+
+//       /* Allocate one extra in case we need to use WSI acquire semaphores. */
+//       VkPipelineStageFlags *stage_flags = (VkPipelineStageFlags*)realloc(vk->hw.wait_dst_stages,
+//             sizeof(VkPipelineStageFlags) * (vk->hw.num_semaphores + 1));
+
+//       VkSemaphore *new_semaphores = (VkSemaphore*)realloc(vk->hw.semaphores,
+//             sizeof(VkSemaphore) * (vk->hw.num_semaphores + 1));
+
+//       vk->hw.wait_dst_stages = stage_flags;
+//       vk->hw.semaphores      = new_semaphores;
+
+//       for (i = 0; i < (int) vk->hw.num_semaphores; i++)
+//       {
+//          vk->hw.wait_dst_stages[i] = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+//          vk->hw.semaphores[i]      = semaphores[i];
+//       }
+
+//       vk->flags                   |= VK_FLAG_HW_VALID_SEMAPHORE;
+//       vk->hw.src_queue_family      = src_queue_family;
+//    }
+// }
+
+static void vulkan_init_hw_render(gfx_ctx_vulkan_data_t *vk, struct retro_hw_render_callback *hwr, struct retro_hw_render_interface_vulkan **iface)
+{
+   if (hwr->context_type != RETRO_HW_CONTEXT_VULKAN)
+      return;
+
+   vk->flags                    |= VK_FLAG_HW_ENABLE;
+
+   (*iface)->interface_type         = RETRO_HW_RENDER_INTERFACE_VULKAN;
+   (*iface)->interface_version      = RETRO_HW_RENDER_INTERFACE_VULKAN_VERSION;
+   (*iface)->instance               = vk->context.instance; // vk->context->instance;
+   (*iface)->gpu                    = vk->context.gpu;
+   (*iface)->device                 = vk->context.device;
+
+   (*iface)->queue                  = vk->context.queue;
+   (*iface)->queue_index            = vk->context.graphics_queue_index;
+
+   (*iface)->handle                 = vk;
+   // iface->set_image              = vulkan_set_image;
+   // iface->get_sync_index         = vulkan_get_sync_index;
+   // iface->get_sync_index_mask    = vulkan_get_sync_index_mask;
+   // iface->wait_sync_index        = vulkan_wait_sync_index;
+   // iface->set_command_buffers    = vulkan_set_command_buffers;
+   // iface->lock_queue             = vulkan_lock_queue;
+   // iface->unlock_queue           = vulkan_unlock_queue;
+   // iface->set_signal_semaphore   = vulkan_set_signal_semaphore;
+
+   (*iface)->get_device_proc_addr   = vkGetDeviceProcAddr;
+   (*iface)->get_instance_proc_addr = vulkan_symbol_wrapper_instance_proc_addr();
+}
+
 
 // void vulkan_context_destroy(gfx_ctx_vulkan_data_t *vk,
 //       bool destroy_surface)
