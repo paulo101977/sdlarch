@@ -13,10 +13,14 @@
 
 #define VULKAN_DIRTY_DYNAMIC_BIT                0x0001
 
+#include "libretro-common\include\gfx\math\matrix_4x4.h"
+#include "libretro-common\include\libchdr\minmax.h"
+
 
 #include <libretro.h>
 #include <libretro_vulkan.h>
 // #include <dynamic/dylib.h>
+
 
 #define VK_BUFFER_CHAIN_DISCARD(chain) \
 { \
@@ -332,6 +336,119 @@ typedef struct vulkan_context
    bool swapchain_fences_signalled[VULKAN_MAX_SWAPCHAIN_IMAGES];
 } vulkan_context_t;
 
+// typedef struct gfx_ctx_driver
+// {
+//    /* The opaque pointer is the underlying video driver data (e.g. gl_t for
+//     * OpenGL contexts). Although not advised, the context driver is allowed
+//     * to hold a pointer to it as the context never outlives the video driver.
+//     *
+//     * The context driver is responsible for it's own data.*/
+//    void* (*init)(void *video_driver);
+//    void (*destroy)(void *data);
+
+//    enum gfx_ctx_api (*get_api)(void *data);
+
+//    /* Which API to bind to. */
+//    bool (*bind_api)(void *video_driver, enum gfx_ctx_api,
+//          unsigned major, unsigned minor);
+
+//    /* Sets the swap interval. */
+//    void (*swap_interval)(void *data, int);
+
+//    /* Sets video mode. Creates a window, etc. */
+//    bool (*set_video_mode)(void*, unsigned, unsigned, bool);
+
+//    /* Gets current window size.
+//     * If not initialized yet, it returns current screen size. */
+//    void (*get_video_size)(void*, unsigned*, unsigned*);
+
+//    float (*get_refresh_rate)(void*);
+
+//    void (*get_video_output_size)(void*, unsigned*, unsigned*, char *, size_t);
+
+//    void (*get_video_output_prev)(void*);
+
+//    void (*get_video_output_next)(void*);
+
+//    get_metrics_cb get_metrics;
+
+//    /* Translates a window size to an aspect ratio.
+//     * In most cases this will be just width / height, but
+//     * some contexts will better know which actual aspect ratio is used.
+//     * This can be NULL to assume the default behavior.
+//     */
+//    float (*translate_aspect)(void*, unsigned, unsigned);
+
+//    /* Asks driver to update window title (FPS, etc). */
+//    update_window_title_cb update_window_title;
+
+//    /* Queries for resize and quit events.
+//     * Also processes events. */
+//    void (*check_window)(void*, bool*, bool*,
+//          unsigned*, unsigned*);
+
+//    /* Acknowledge a resize event. This is needed for some APIs.
+//     * Most backends will ignore this. */
+//    set_resize_cb set_resize;
+
+//    /* Checks if window has input focus. */
+//    bool (*has_focus)(void*);
+
+//    /* Should the screensaver be suppressed? */
+//    bool (*suppress_screensaver)(void *data, bool enable);
+
+//    /* Checks if context driver has windowed support. */
+//    bool has_windowed;
+
+//    /* Swaps buffers. VBlank sync depends on
+//     * earlier calls to swap_interval. */
+//    void (*swap_buffers)(void*);
+
+//    /* Most video backends will want to use a certain input driver.
+//     * Checks for it here. */
+//    void (*input_driver)(void*, const char *, input_driver_t**, void**);
+
+//    /* Wraps whatever gl_proc_address() there is.
+//     * Does not take opaque, to avoid lots of ugly wrapper code. */
+//    gfx_ctx_proc_t (*get_proc_address)(const char*);
+
+//    /* Returns true if this context supports EGLImage buffers for
+//     * screen drawing and was initialized correctly. */
+//    bool (*image_buffer_init)(void*, const video_info_t*);
+
+//    /* Writes the frame to the EGLImage and sets image_handle to it.
+//     * Returns true if a new image handle is created.
+//     * Always returns true the first time it's called for a new index.
+//     * The graphics core must handle a change in the handle correctly. */
+//    bool (*image_buffer_write)(void*, const void *frame, unsigned width,
+//          unsigned height, unsigned pitch, bool rgb32,
+//          unsigned index, void **image_handle);
+
+//    /* Shows or hides mouse. Can be NULL if context doesn't
+//     * have a concept of mouse pointer. */
+//    void (*show_mouse)(void *data, bool state);
+
+//    /* Human readable string. */
+//    const char *ident;
+
+//    uint32_t (*get_flags)(void *data);
+
+//    void     (*set_flags)(void *data, uint32_t flags);
+
+//    /* Optional. Binds HW-render offscreen context. */
+//    void (*bind_hw_render)(void *data, bool enable);
+
+//    /* Optional. Gets base data for the context which is used by the driver.
+//     * This is mostly relevant for graphics APIs such as Vulkan
+//     * which do not have global context state. */
+//    void *(*get_context_data)(void *data);
+
+//    /* Optional. Makes driver context (only GL right now)
+//     * active for this thread. */
+//    void (*make_current)(bool release);
+// } gfx_ctx_driver_t;
+
+
 struct vulkan_emulated_mailbox
 {
 //    sthread_t *thread;
@@ -412,6 +529,212 @@ struct vk_descriptor_manager
    unsigned num_sizes;
 };
 
+struct vk_color
+{
+   float r, g, b, a;
+};
+
+struct vk_image
+{
+   VkImage image;                /* ptr alignment */
+   VkImageView view;             /* ptr alignment */
+   VkFramebuffer framebuffer;    /* ptr alignment */
+   VkDeviceMemory memory;        /* ptr alignment */
+};
+
+struct vk_texture
+{
+   VkDeviceSize memory_size;     /* uint64_t alignment */
+
+   void *mapped;
+   VkImage image;                /* ptr alignment */
+   VkImageView view;             /* ptr alignment */
+   VkBuffer buffer;              /* ptr alignment */
+   VkDeviceMemory memory;        /* ptr alignment */
+
+   size_t offset;
+   size_t stride;
+   size_t size;
+   uint32_t memory_type;
+   unsigned width, height;
+
+   VkImageLayout layout;         /* enum alignment */
+   VkFormat format;              /* enum alignment */
+   enum vk_texture_type type;
+   uint8_t flags;
+};
+
+struct vk_per_frame
+{
+   struct vk_texture texture;          /* uint64_t alignment */
+   struct vk_texture texture_optimal;
+   struct vk_buffer_chain vbo;         /* uint64_t alignment */
+   struct vk_buffer_chain ubo;
+   struct vk_descriptor_manager descriptor_manager;
+
+   VkCommandPool cmd_pool; /* ptr alignment */
+   VkCommandBuffer cmd;    /* ptr alignment */
+};
+
+struct vk_draw_quad
+{
+   struct vk_texture *texture;
+   const math_matrix_4x4 *mvp;
+   VkPipeline pipeline;          /* ptr alignment */
+   VkSampler sampler;            /* ptr alignment */
+   struct vk_color color;        /* float alignment */
+};
+
+struct vk_draw_triangles
+{
+   const void *uniform;
+   const struct vk_buffer_range *vbo;
+   struct vk_texture *texture;
+   VkPipeline pipeline;          /* ptr alignment */
+   VkSampler sampler;            /* ptr alignment */
+   size_t uniform_size;
+   unsigned vertices;
+};
+
+typedef struct vulkan_filter_chain vulkan_filter_chain_t;
+
+typedef struct vk
+{
+   vulkan_filter_chain_t *filter_chain;
+   vulkan_filter_chain_t *filter_chain_default;
+   vulkan_context_t *context;
+   void *ctx_data;
+   // const gfx_ctx_driver_t *ctx_driver; // TODO uncomment if necessary
+   struct vk_per_frame *chain;
+   struct vk_image *backbuffer;
+#ifdef VULKAN_HDR_SWAPCHAIN
+   VkRenderPass readback_render_pass;
+   struct vk_image main_buffer;
+   struct vk_image readback_image;
+#endif /* VULKAN_HDR_SWAPCHAIN */
+
+   unsigned video_width;
+   unsigned video_height;
+
+   unsigned tex_w, tex_h;
+   unsigned out_vp_width;
+   unsigned out_vp_height;
+   unsigned rotation;
+   unsigned num_swapchain_images;
+   unsigned last_valid_index;
+
+   // video_info_t video; // TODO uncomment if necessary
+
+   VkFormat tex_fmt;
+   math_matrix_4x4 mvp, mvp_no_rot, mvp_menu; /* float alignment */
+   VkViewport vk_vp;
+   VkRenderPass render_pass;
+   // struct video_viewport vp; // TODO uncomment if necessary
+   float translate_x;
+   float translate_y;
+   struct vk_per_frame swapchain[VULKAN_MAX_SWAPCHAIN_IMAGES];
+   struct vk_image backbuffers[VULKAN_MAX_SWAPCHAIN_IMAGES];
+   struct vk_texture default_texture;
+
+   /* Currently active command buffer. */
+   VkCommandBuffer cmd;
+   /* Staging pool for doing buffer transfers on GPU. */
+   VkCommandPool staging_pool;
+
+   // TODO uncomment if necessary
+   // struct
+   // {
+   //    struct scaler_ctx scaler_bgr;
+   //    struct scaler_ctx scaler_rgb;
+   //    struct vk_texture staging[VULKAN_MAX_SWAPCHAIN_IMAGES];
+   // } readback;
+
+   struct
+   {
+      struct vk_texture *images;
+      struct vk_vertex *vertex;
+      unsigned count;
+   } overlay;
+
+   struct
+   {
+      VkPipeline alpha_blend;
+      VkPipeline font;
+      VkPipeline rgb565_to_rgba8888;
+#ifdef VULKAN_HDR_SWAPCHAIN
+      VkPipeline hdr;
+      VkPipeline hdr_to_sdr; /* for readback */
+#endif /* VULKAN_HDR_SWAPCHAIN */
+      VkDescriptorSetLayout set_layout;
+      VkPipelineLayout layout;
+      VkPipelineCache cache;
+   } pipelines;
+
+   struct
+   {
+      VkPipeline pipelines[8 * 2];
+      struct vk_texture blank_texture;
+   } display;
+
+#ifdef VULKAN_HDR_SWAPCHAIN
+   struct
+   {
+      struct vk_buffer  ubo;
+      float             max_output_nits;
+      float             min_output_nits;
+      float             max_cll;
+      float             max_fall;
+   } hdr;
+#endif /* VULKAN_HDR_SWAPCHAIN */
+
+   struct
+   {
+      struct vk_texture textures[VULKAN_MAX_SWAPCHAIN_IMAGES];
+      struct vk_texture textures_optimal[VULKAN_MAX_SWAPCHAIN_IMAGES];
+      unsigned last_index;
+      float alpha;
+      bool dirty[VULKAN_MAX_SWAPCHAIN_IMAGES];
+   } menu;
+
+   struct
+   {
+      VkSampler linear;
+      VkSampler nearest;
+      VkSampler mipmap_nearest;
+      VkSampler mipmap_linear;
+   } samplers;
+
+   struct
+   {
+      const struct retro_vulkan_image *image;
+      VkPipelineStageFlags *wait_dst_stages;
+      VkCommandBuffer *cmd;
+      VkSemaphore *semaphores;
+      VkSemaphore signal_semaphore; /* ptr alignment */
+
+      struct retro_hw_render_interface_vulkan iface;
+
+      unsigned capacity_cmd;
+      unsigned last_width;
+      unsigned last_height;
+      uint32_t num_semaphores;
+      uint32_t num_cmd;
+      uint32_t src_queue_family;
+
+   } hw;
+
+   struct
+   {
+      uint64_t dirty;
+      VkPipeline pipeline; /* ptr alignment */
+      VkImageView view;    /* ptr alignment */
+      VkSampler sampler;   /* ptr alignment */
+      math_matrix_4x4 mvp;
+      VkRect2D scissor;    /* int32_t alignment */
+   } tracker;
+   uint32_t flags;
+} vk_t;
+
 bool vulkan_buffer_chain_alloc(const struct vulkan_context *context,
       struct vk_buffer_chain *chain, size_t len,
       struct vk_buffer_range *range);
@@ -480,6 +803,13 @@ bool vulkan_create_swapchain(gfx_ctx_vulkan_data_t *vk,unsigned width, unsigned 
 void vulkan_acquire_next_image(gfx_ctx_vulkan_data_t *vk);
 bool vulkan_context_init(gfx_ctx_vulkan_data_t *vk, enum vulkan_wsi_type type);
 void vulkan_init_hw_render(gfx_ctx_vulkan_data_t *vk, struct retro_hw_render_callback *hwr, struct retro_hw_render_interface_vulkan **iface);
+struct vk_texture vulkan_create_texture(vk_t *vk,
+      struct vk_texture *old,
+      unsigned width, unsigned height,
+      VkFormat format,
+      const void *initial,
+      const VkComponentMapping *swizzle,
+      enum vk_texture_type type);
 #ifdef __cplusplus
 }
 #endif

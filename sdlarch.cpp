@@ -745,6 +745,47 @@ static uint32_t vulkan_get_sync_index(void *handle)
    return vk->context.current_frame_index;
 }
 
+// TODO implement and mabe work!!!!!!!!!!!!
+static void vulkan_set_image(void *handle,
+      const struct retro_vulkan_image *image,
+      uint32_t num_semaphores,
+      const VkSemaphore *semaphores,
+      uint32_t src_queue_family)
+{
+
+}
+
+// TODO implement and mabe work!!!!!!!!!!!!
+static void vulkan_init_textures(vk_t *vk)
+{
+   const uint32_t zero = 0;
+
+   if (!(vk->flags & VK_FLAG_HW_ENABLE))
+   {
+      int i;
+      for (i = 0; i < (int) vk->num_swapchain_images; i++)
+      {
+         vk->swapchain[i].texture = vulkan_create_texture(
+               vk, NULL, vk->tex_w, vk->tex_h, vk->tex_fmt,
+               NULL, NULL, VULKAN_TEXTURE_STREAMED);
+
+         {
+            struct vk_texture *texture = &vk->swapchain[i].texture;
+            VK_MAP_PERSISTENT_TEXTURE(vk->context->device, texture);
+         }
+
+         if (vk->swapchain[i].texture.type == VULKAN_TEXTURE_STAGING)
+            vk->swapchain[i].texture_optimal = vulkan_create_texture(
+                  vk, NULL, vk->tex_w, vk->tex_h, vk->tex_fmt,
+                  NULL, NULL, VULKAN_TEXTURE_DYNAMIC);
+      }
+   }
+
+   vk->default_texture = vulkan_create_texture(vk, NULL,
+         1, 1, VK_FORMAT_B8G8R8A8_UNORM,
+         &zero, NULL, VULKAN_TEXTURE_STATIC);
+}
+
 static bool core_environment(unsigned cmd, void *data) {
 	switch (cmd) {
     case RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE:
@@ -1036,7 +1077,16 @@ static bool core_environment(unsigned cmd, void *data) {
         SDL_Vulkan_CreateSurface(g_win, vk->context.instance, &surface);
         vk->vk_surface = surface;
         vulkan_context_init_device(vk);
+        vulkan_create_swapchain(vk, 640, 480, 1);
+        vk_t _vk = {};
+        _vk.context = &vk->context;
+        _vk.num_swapchain_images = vk->context.num_swapchain_images;
+        // _vk.swapchain = vk->context.swapchain;
+        // vulkan_init_textures(&_vk);
 
+        PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = vulkan_symbol_wrapper_instance_proc_addr();
+
+        printf("[ENV] vulkan_symbol_wrapper_instance_proc_addr: >>>>>>>>>>>>>>>>>>>>>>>>>>>>>> %p\n", (void*)vkGetInstanceProcAddr);
 
         g_render_iface.interface_type         = RETRO_HW_RENDER_INTERFACE_VULKAN;
         g_render_iface.interface_version      = RETRO_HW_RENDER_INTERFACE_VULKAN_VERSION;
@@ -1053,11 +1103,11 @@ static bool core_environment(unsigned cmd, void *data) {
         g_render_iface.unlock_queue           = vulkan_unlock_queue;
         g_render_iface.wait_sync_index = vulkan_wait_sync_index;
         g_render_iface.get_sync_index         = vulkan_get_sync_index;
+        g_render_iface.set_image              = vulkan_set_image;
+        g_render_iface.get_device_proc_addr   = vkGetDeviceProcAddr;
+        g_render_iface.get_instance_proc_addr = vkGetInstanceProcAddr;
 
         g_video.hw.context_reset();
-
-        
-        
 
         
         printf("[ENV] Stored Vulkan negotiation interface: %p\n", (void*)g_iface);
@@ -1441,7 +1491,7 @@ int main(int argc, char *argv[]) {
     SDL_Event ev;
 
     int frame_count = 0;
-    while (running && frame_count < 10) {
+    while (running) {
         printf("[FRAME %d] === START FRAME ===\n", frame_count);
         while (SDL_PollEvent(&ev)) {
             switch (ev.type) {
