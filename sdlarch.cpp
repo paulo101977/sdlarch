@@ -40,7 +40,7 @@ static bool g_context_reset = false;
 static struct retro_hw_render_interface_vulkan g_render_iface = {};
 
 static gfx_ctx_vulkan_data_t _vk = {};
-static gfx_ctx_vulkan_data_t *vk = &_vk;
+static gfx_ctx_vulkan_data_t *g_vk = &_vk;
 
 VkSurfaceKHR surface;
 VkFormat depthFormat;//
@@ -56,260 +56,6 @@ vector<VkCommandBuffer> commandBuffers;
 VkSemaphore imageAvailableSemaphore;
 VkSemaphore renderingFinishedSemaphore;
 
-VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags)
-{
-    VkImageViewCreateInfo viewInfo = {};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = image;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = format;
-    viewInfo.subresourceRange.aspectMask = aspectFlags;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
-
-    VkImageView imageView;
-    if (vkCreateImageView(vk->context.device, &viewInfo, nullptr, &imageView) != VK_SUCCESS)
-    {
-        throw std::runtime_error("failed to create texture image view!");
-    }
-
-    return imageView;
-}
-
-void Create_ImageViews()
-{
-    swapchainImageViews.resize(vk -> context.num_swapchain_images);
-
-    // vk -> context.swapchain_images.resize(vk -> context.swapchain_images.size());
-
-    for (uint32_t i = 0; i < vk -> context.num_swapchain_images; i++)
-    {
-        printf("[Env] Creating image view for swapchain image %d\n", i);
-        swapchainImageViews[i] = createImageView(
-            vk -> context.swapchain_images[i], vk->context.swapchain_format, VK_IMAGE_ASPECT_COLOR_BIT
-        );
-    }    
-}
-
-VkBool32 getSupportedDepthFormat(VkPhysicalDevice physicalDevice, VkFormat *depthFormat)
-{
-    std::vector<VkFormat> depthFormats = {
-        VK_FORMAT_D32_SFLOAT_S8_UINT,
-        VK_FORMAT_D32_SFLOAT,
-        VK_FORMAT_D24_UNORM_S8_UINT,
-        VK_FORMAT_D16_UNORM_S8_UINT,
-        VK_FORMAT_D16_UNORM
-    };
-
-    for (auto& format : depthFormats)
-    {
-        VkFormatProperties formatProps;
-        vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &formatProps);
-        if (formatProps.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)
-        {
-            *depthFormat = format;
-            return true;
-        }
-    }
-
-    return false;
-}
-
-uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties)
-{
-    VkPhysicalDeviceMemoryProperties memProperties;
-    vkGetPhysicalDeviceMemoryProperties(vk -> context.gpu, &memProperties);
-
-    for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++)
-    {
-        if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties)
-        {
-            return i;
-        }
-    }
-
-    throw std::runtime_error("failed to find suitable memory type!");
-}
-
-void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, 
-                        VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, 
-                        VkDeviceMemory& imageMemory)
-{
-    VkImageCreateInfo imageInfo = {};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = width;
-    imageInfo.extent.height = height;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.format = format;
-    imageInfo.tiling = tiling;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = usage;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    if (vkCreateImage(vk -> context.device, &imageInfo, nullptr, &image) != VK_SUCCESS)
-    {
-        throw std::runtime_error("failed to create image!");
-    }
-
-    VkMemoryRequirements memRequirements;
-    vkGetImageMemoryRequirements(vk -> context.device, image, &memRequirements);
-
-    VkMemoryAllocateInfo allocInfo = {};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
-
-    if (vkAllocateMemory(vk -> context.device, &allocInfo, nullptr, &imageMemory) != VK_SUCCESS) {
-        throw std::runtime_error("failed to allocate image memory!");
-    }
-
-    vkBindImageMemory(vk -> context.device, image, imageMemory, 0);
-}
-
-void Setup_DepthStencil()
-{
-    VkBool32 validDepthFormat = getSupportedDepthFormat(vk -> context.gpu, &depthFormat);
-    createImage(vk -> context.swapchain_width, vk -> context.swapchain_height, 
-                VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_TILING_OPTIMAL, 
-                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 
-                depthImage, depthImageMemory);
-    depthImageView = createImageView(depthImage, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT);
-}
-
-void Create_RenderPass()
-{
-    vector<VkAttachmentDescription> attachments(2);
-
-    attachments[0].format = surfaceFormat.format;
-    attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
-    attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-    attachments[1].format = depthFormat;
-    attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
-    attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference colorReference = {};
-    colorReference.attachment = 0;
-    colorReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference depthReference = {};
-    depthReference.attachment = 1;
-    depthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-    VkSubpassDescription subpassDescription = {};
-    subpassDescription.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpassDescription.colorAttachmentCount = 1;
-    subpassDescription.pColorAttachments = &colorReference;
-    subpassDescription.pDepthStencilAttachment = &depthReference;
-    subpassDescription.inputAttachmentCount = 0;
-    subpassDescription.pInputAttachments = nullptr;
-    subpassDescription.preserveAttachmentCount = 0;
-    subpassDescription.pPreserveAttachments = nullptr;
-    subpassDescription.pResolveAttachments = nullptr;
-
-    vector<VkSubpassDependency> dependencies(1);
-
-    dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependencies[0].dstSubpass = 0;
-    dependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependencies[0].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-    dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
-
-    VkRenderPassCreateInfo renderPassInfo = {};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-    renderPassInfo.pAttachments = attachments.data();
-    renderPassInfo.subpassCount = 1;
-    renderPassInfo.pSubpasses = &subpassDescription;
-    renderPassInfo.dependencyCount = static_cast<uint32_t>(dependencies.size());
-    renderPassInfo.pDependencies = dependencies.data();
-
-    vkCreateRenderPass(vk-> context.device, &renderPassInfo, nullptr, &render_pass);
-}
-
-void Create_Framebuffers()
-{
-    swapchainFramebuffers.resize(vk -> context.num_swapchain_images);
-
-    for (size_t i = 0; i < vk -> context.num_swapchain_images; i++)
-    {
-        std::vector<VkImageView> attachments(2);
-        attachments[0] = swapchainImageViews[i];
-        attachments[1] = depthImageView;
-
-        VkFramebufferCreateInfo framebufferInfo = {};
-        framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        framebufferInfo.renderPass = render_pass;
-        framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-        framebufferInfo.pAttachments = attachments.data();
-        framebufferInfo.width = vk -> context.swapchain_width;
-        framebufferInfo.height = vk -> context.swapchain_height;
-        framebufferInfo.layers = 1;
-
-        if (vkCreateFramebuffer(vk -> context.device, &framebufferInfo, nullptr, &swapchainFramebuffers[i]) != VK_SUCCESS)
-        {
-            throw std::runtime_error("failed to create framebuffer!");
-        }
-    }
-}
-
-void createCommandPool()
-{
-    VkResult result;
-
-    VkCommandPoolCreateInfo createInfo = {};
-    createInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    createInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT | VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-    createInfo.queueFamilyIndex = vk->context.graphics_queue_index;
-    vkCreateCommandPool(vk -> context.device, &createInfo, nullptr, &commandPool);
-}
-
-void createCommandBuffers()
-{
-    VkResult result;
-
-    VkCommandBufferAllocateInfo allocateInfo = {};
-    allocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocateInfo.commandPool = commandPool;
-    allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocateInfo.commandBufferCount = vk -> context.num_swapchain_images;
-
-    commandBuffers.resize(vk -> context.num_swapchain_images);
-    vkAllocateCommandBuffers(vk -> context.device, &allocateInfo, commandBuffers.data());
-}
-
-void createSemaphore(VkSemaphore *semaphore)
-{
-    VkResult result;
-
-    VkSemaphoreCreateInfo createInfo = {};
-    createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    vkCreateSemaphore(vk -> context.device, &createInfo, nullptr, semaphore);
-}
-
-void create_semaphores()
-{
-    createSemaphore(&imageAvailableSemaphore);
-    createSemaphore(&renderingFinishedSemaphore);
-}
 
 static struct {
     struct retro_hw_render_callback hw;
@@ -500,15 +246,11 @@ static void create_window(int width, int height) {
 	if (!g_win)
         die("Failed to create window: %s", SDL_GetError());
 
-
-    // SDL_GL_SetSwapInterval(1);
-    // SDL_GL_SwapWindow(g_win); // make apitrace output nicer
-
     resize_cb(width, height);
 
-    // if (g_video.hw.context_reset) {
-    //     g_video.hw.context_reset();
-    // }
+    if (g_video.hw.context_reset) {
+        g_video.hw.context_reset();
+    }
 }
 
 
@@ -719,7 +461,8 @@ static int key_exists(const char* key) {
 
 static uint32_t vulkan_get_sync_index_mask(void *handle)
 {
-   return (1 << vk ->context.num_swapchain_images) - 1;
+   printf("[VULKAN] vulkan_get_sync_index_mask called  ---------------->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> \n");
+   return (1 << g_vk ->context.num_swapchain_images) - 1;
 }
 
 void vulkan_context_reset() {
@@ -728,21 +471,24 @@ void vulkan_context_reset() {
 
 static void vulkan_lock_queue(void *handle)
 {
+    printf("[VULKAN] vulkan_lock_queue called  ---------------->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> \n");
 //    slock_lock(vk->context.queue_lock);
 }
 
 static void vulkan_unlock_queue(void *handle)
 {
+    printf("[VULKAN] vulkan_unlock_queue called  ---------------->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> \n");
 //    slock_unlock(vk->context.queue_lock);
 }
 
 static void vulkan_wait_sync_index(void *handle) {
-
+    printf("[VULKAN] vulkan_wait_sync_index called  ---------------->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> \n");
 }
 
 static uint32_t vulkan_get_sync_index(void *handle)
 {
-   return vk->context.current_frame_index;
+    printf("[VULKAN] vulkan_get_sync_index called  ---------------->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> \n");
+    return g_vk->context.current_frame_index;
 }
 
 // TODO implement and mabe work!!!!!!!!!!!!
@@ -752,7 +498,44 @@ static void vulkan_set_image(void *handle,
       const VkSemaphore *semaphores,
       uint32_t src_queue_family)
 {
+   vk_t *vk              = (vk_t*)handle;
 
+   printf("[VULKAN] vulkan_set_image called  ---------------->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> \n");
+
+   printf("[VULKAN] image: %p, num_semaphores: %u, semaphores: %p, src_queue_family: %u\n",
+         (void*)image, num_semaphores, (void*)semaphores, src_queue_family);
+    
+   printf("[VULKAN] vulkan_set_image vk: %p \n", vk);
+   printf("[VULKAN] vulkan_set_image vk->hw: %p \n", vk->hw);
+   printf("[VULKAN] vulkan_set_image image: %p \n", image);
+
+//    TODO: fix segmentation fault
+//    vk->hw.image          = image;
+//    vk->hw.num_semaphores = num_semaphores;
+
+//    if (num_semaphores > 0)
+//    {
+//       int i;
+
+//       /* Allocate one extra in case we need to use WSI acquire semaphores. */
+//       VkPipelineStageFlags *stage_flags = (VkPipelineStageFlags*)realloc(vk->hw.wait_dst_stages,
+//             sizeof(VkPipelineStageFlags) * (vk->hw.num_semaphores + 1));
+
+//       VkSemaphore *new_semaphores = (VkSemaphore*)realloc(vk->hw.semaphores,
+//             sizeof(VkSemaphore) * (vk->hw.num_semaphores + 1));
+
+//       vk->hw.wait_dst_stages = stage_flags;
+//       vk->hw.semaphores      = new_semaphores;
+
+//       for (i = 0; i < (int) vk->hw.num_semaphores; i++)
+//       {
+//          vk->hw.wait_dst_stages[i] = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+//          vk->hw.semaphores[i]      = semaphores[i];
+//       }
+
+//       vk->flags                   |= VK_FLAG_HW_VALID_SEMAPHORE;
+//       vk->hw.src_queue_family      = src_queue_family;
+//    }
 }
 
 // TODO implement and mabe work!!!!!!!!!!!!
@@ -946,99 +729,7 @@ static bool core_environment(unsigned cmd, void *data) {
         printf("[ENV] vulkan_init_hw_render done, interface_type: %d\n", ((retro_hw_render_interface_vulkan*)*iface) -> interface_type);
         printf("[ENV] vulkan_init_hw_render done, interface_type: %d\n", ((retro_hw_render_interface_vulkan*)*iface) -> interface_version);
 
-        // TODO implement and mabe work!!!!
-        // (*iface)->interface_type         = RETRO_HW_RENDER_INTERFACE_VULKAN;
-        // (*iface)->interface_version      = RETRO_HW_RENDER_INTERFACE_VULKAN_VERSION;
-        // ((retro_hw_render_interface_vulkan*)*iface)->instance               = vk->context.instance; // vk->context->instance;
-        // ((retro_hw_render_interface_vulkan*)*iface)->gpu                    = vk->context.gpu;
-        // ((retro_hw_render_interface_vulkan*)*iface)->device                 = vk->context.device;
-
-        // ((retro_hw_render_interface_vulkan*)*iface)->queue                  = vk->context.queue;
-        // ((retro_hw_render_interface_vulkan*)*iface)->queue_index            = vk->context.graphics_queue_index;
-
-        // ((retro_hw_render_interface_vulkan*)*iface)->handle                 = vk;
-        // ((retro_hw_render_interface_vulkan*)*iface)->instance               = vk->context.instance; // vk->context->instance;
-        // ((retro_hw_render_interface_vulkan*)*iface)->gpu                    = vk->context.gpu;
-        // ((retro_hw_render_interface_vulkan*)*iface)->device                 = vk->context.device;
-
-        // ((retro_hw_render_interface_vulkan*)*iface)->queue                  = vk->context.queue;
-        // ((retro_hw_render_interface_vulkan*)*iface)->queue_index            = vk->context.graphics_queue_index;
-
-        // if(g_iface) {
-        //     printf("[ENV] Calling context_reset()\n");
-        //     vulkan_context_init_device(vk);
-        // }
         
-
-        // g_render_iface->handle                 = vk;
-        // iface->set_image              = vulkan_set_image;
-        // iface->get_sync_index         = vulkan_get_sync_index;
-        // ((retro_hw_render_interface_vulkan*)*iface)->get_sync_index_mask    = vulkan_get_sync_index_mask;
-        // iface->wait_sync_index        = vulkan_wait_sync_index;
-        // iface->set_command_buffers    = vulkan_set_command_buffers;
-        // iface->lock_queue             = vulkan_lock_queue;
-        // iface->unlock_queue           = vulkan_unlock_queue;
-        // iface->set_signal_semaphore   = vulkan_set_signal_semaphore;
-
-        // ((retro_hw_render_interface_vulkan*)*iface)->get_device_proc_addr   = vkGetDeviceProcAddr;
-        // ((retro_hw_render_interface_vulkan*)*iface)->get_instance_proc_addr = vulkan_symbol_wrapper_instance_proc_addr();
-
-        // *iface = (retro_hw_render_interface*)&g_render_iface;
-
-        // if(g_iface) {
-        //     SDL_Vulkan_CreateSurface(g_win, vk->context.instance, &surface);
-        //     vk->vk_surface = surface;
-
-        //     vulkan_context_init_device(vk);
-        //     if(!vulkan_load_device_symbols(vk)){
-        //         printf("[ENV] ERROR: vulkan_load_device_symbols() failed\n");
-        //         return false;
-        //     }
-
-        //     uint32_t gpu_count = 0;
-        //     vkEnumeratePhysicalDevices(vk->context.instance, &gpu_count, NULL);
-        //     printf("=== WSL GPU ENUMERATION ===\n");
-        //     printf("Total physical devices: %u\n", gpu_count);
-
-        //     std::vector<VkPhysicalDevice> gpus(gpu_count);
-        //     vkEnumeratePhysicalDevices(vk->context.instance, &gpu_count, gpus.data());
-
-        //     for (uint32_t i = 0; i < gpu_count; i++) {
-        //         VkPhysicalDeviceProperties props;
-        //         VkPhysicalDeviceFeatures features;
-                
-        //         vkGetPhysicalDeviceProperties(gpus[i], &props);
-        //         vkGetPhysicalDeviceFeatures(gpus[i], &features);
-                
-        //         printf("GPU %d:\n", i);
-        //         printf("  Handle: %p\n", gpus[i]);
-        //         printf("  Name: %s\n", props.deviceName);
-        //         printf("  Type: %d\n", props.deviceType);
-        //         printf("  API: %d.%d.%d\n", 
-        //             VK_VERSION_MAJOR(props.apiVersion),
-        //             VK_VERSION_MINOR(props.apiVersion),
-        //             VK_VERSION_PATCH(props.apiVersion));
-        //         printf("  Geometry Shader: %d\n", features.geometryShader);
-        //         printf(" ---\n");
-        //     }
-        //     vulkan_create_swapchain(vk, 640, 480, 1);
-        //     Create_ImageViews();
-        //     Setup_DepthStencil();
-        //     Create_RenderPass();
-        //     Create_Framebuffers();
-        //     createCommandPool();
-        //     createCommandBuffers();
-        //     create_semaphores();
-            
-        //     if(g_iface -> create_device) {
-        //         printf("[ENV] Calling create_device()\n");
-        //         printf("[ENV] vk->context.swapchain_width: %d\n", vk->context.swapchain_width);
-        //         printf("[ENV] vk->context.swapchain_height: %d\n", vk->context.swapchain_height);
-        //         printf("[ENV] vk->context.swap_interval: %d\n", vk->context.swap_interval);
-        //         printf("[ENV] vk->swapchain: %p\n", vk->swapchain);
-        //         printf("[ENV] vk->context.graphics_queue_index: %d\n", vk->context.graphics_queue_index);
-        //     }
-        // }
         return true;
     }
 
@@ -1070,18 +761,19 @@ static bool core_environment(unsigned cmd, void *data) {
         // What to do here?
         g_iface = iface;
 #ifdef _WIN32
-        vulkan_context_init(vk, VULKAN_WSI_WIN32);
+        vulkan_context_init(g_vk, VULKAN_WSI_WIN32);
 #else
-        vulkan_context_init(vk, VULKAN_WSI_XLIB);
+        vulkan_context_init(g_vk, VULKAN_WSI_XLIB);
 #endif
-        SDL_Vulkan_CreateSurface(g_win, vk->context.instance, &surface);
-        vk->vk_surface = surface;
-        vulkan_context_init_device(vk);
-        vulkan_create_swapchain(vk, 640, 480, 1);
+        SDL_Vulkan_CreateSurface(g_win, g_vk->context.instance, &surface);
+        g_vk->vk_surface = surface;
+        vulkan_context_init_device(g_vk);
+        vulkan_create_swapchain(g_vk, 640, 480, 1);
         vk_t _vk = {};
-        _vk.context = &vk->context;
-        _vk.num_swapchain_images = vk->context.num_swapchain_images;
-        // _vk.swapchain = vk->context.swapchain;
+        _vk.context = &g_vk->context;
+        _vk.num_swapchain_images = g_vk->context.num_swapchain_images;
+        _vk.hw = {};
+        // _vk.swapchain = g_vk->context.swapchain;
         // vulkan_init_textures(&_vk);
 
         PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = vulkan_symbol_wrapper_instance_proc_addr();
@@ -1090,14 +782,14 @@ static bool core_environment(unsigned cmd, void *data) {
 
         g_render_iface.interface_type         = RETRO_HW_RENDER_INTERFACE_VULKAN;
         g_render_iface.interface_version      = RETRO_HW_RENDER_INTERFACE_VULKAN_VERSION;
-        g_render_iface.instance               = vk->context.instance; // vk->context->instance;
-        g_render_iface.gpu                    = vk->context.gpu;
-        g_render_iface.device                 = vk->context.device;
+        g_render_iface.instance               = g_vk->context.instance; // vk->context->instance;
+        g_render_iface.gpu                    = g_vk->context.gpu;
+        g_render_iface.device                 = g_vk->context.device;
 
-        g_render_iface.queue                  = vk->context.queue;
-        g_render_iface.queue_index            = vk->context.graphics_queue_index;
+        g_render_iface.queue                  = g_vk->context.queue;
+        g_render_iface.queue_index            = g_vk->context.graphics_queue_index;
 
-        g_render_iface.handle                 = vk;
+        g_render_iface.handle                 = g_vk;
         g_render_iface.get_sync_index_mask = vulkan_get_sync_index_mask;
         g_render_iface.lock_queue             = vulkan_lock_queue;
         g_render_iface.unlock_queue           = vulkan_unlock_queue;
@@ -1109,115 +801,8 @@ static bool core_environment(unsigned cmd, void *data) {
 
         g_video.hw.context_reset();
 
-        
         printf("[ENV] Stored Vulkan negotiation interface: %p\n", (void*)g_iface);
 
-        // TODO: fix and mabe work!!!!!!!!!!!!!
-        // struct retro_vulkan_context *context,
-        // VkInstance instance,
-        // VkPhysicalDevice gpu,
-        // VkSurfaceKHR surface,
-        // PFN_vkGetInstanceProcAddr get_instance_proc_addr,
-        // const char **required_device_extensions,
-        // unsigned num_required_device_extensions,
-        // const char **required_device_layers,
-        // unsigned num_required_device_layers,
-        // const VkPhysicalDeviceFeatures *required_features
-        // g_iface ->create_device(
-        //     vk->context.instance, 
-        //     vk->context.gpu, 
-        //     vk->context.graphics_queue_index, 
-        //     vk->context.swapchain_width, 
-        //     vk->context.swapchain_height, 
-        //     vk->context.swap_interval, 
-        //     vk->swapchain
-        // );
-        // vulkan_context_init_device(vk);
-
-        // TODO fill vulkan_context
-        // TODO: call any functions needed to reset the vulkan context from below
-    //     static const struct retro_hw_render_context_negotiation_interface_vulkan iface = {
-    //         RETRO_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_VULKAN,
-    //         RETRO_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_VULKAN_VERSION,
-    //         Vk::GetApplicationInfo,
-    //         Vk::CreateDevice,
-    //         NULL, // destroy_device
-    // #ifdef __APPLE__
-    //         Vk::CreateInstance, // create_instance (v2 API)
-    //         NULL, // create_device2
-    // #endif
-    //     };
-
-
-        // typedef struct vulkan_context
-        // {
-        //     //    slock_t *queue_lock;
-        //     retro_vulkan_destroy_device_t destroy_device;   /* ptr alignment */
-
-        //     VkInstance instance;
-        //     VkPhysicalDevice gpu;
-        //     VkDevice device;
-        //     VkQueue queue;
-
-        //     VkPhysicalDeviceProperties gpu_properties;
-        //     VkPhysicalDeviceMemoryProperties memory_properties;
-
-        //     VkPresentModeKHR present_modes[16];
-        //     VkImage swapchain_images[VULKAN_MAX_SWAPCHAIN_IMAGES];
-        //     VkFence swapchain_fences[VULKAN_MAX_SWAPCHAIN_IMAGES];
-        //     VkFormat swapchain_format;
-
-        //     VkSemaphore swapchain_semaphores[VULKAN_MAX_SWAPCHAIN_IMAGES];
-        //     VkSemaphore swapchain_acquire_semaphore;
-        //     VkSemaphore swapchain_recycled_semaphores[VULKAN_MAX_SWAPCHAIN_IMAGES];
-        //     VkSemaphore swapchain_wait_semaphores[VULKAN_MAX_SWAPCHAIN_IMAGES];
-
-
-        //     uint32_t graphics_queue_index;
-        //     uint32_t num_swapchain_images;
-        //     uint32_t current_swapchain_index;
-        //     uint32_t current_frame_index;
-
-        //     unsigned swapchain_width;
-        //     unsigned swapchain_height;
-        //     unsigned num_recycled_acquire_semaphores;
-
-        //     int8_t swap_interval;
-        //     uint8_t flags;
-
-        //     bool swapchain_fences_signalled[VULKAN_MAX_SWAPCHAIN_IMAGES];
-        // } vulkan_context_t;
-        
-        // TODO fill struct gfx_ctx_vulkan_data_t
-    //    typedef struct gfx_ctx_vulkan_data
-    //     {
-    //         struct string_list *gpu_list;
-    //         vulkan_context_t context;
-    //         VkSurfaceKHR vk_surface;      /* ptr alignment */
-    //         VkSwapchainKHR swapchain;     /* ptr alignment */
-    //         struct vulkan_emulated_mailbox mailbox;
-    //         uint8_t flags;
-    //         enum vulkan_wsi_type wsi_type;
-    //     } gfx_ctx_vulkan_data_t;
-
-        // this create the vk->context.instance
-        // TODO call vulkan_context_init
-// #ifdef _WIN32
-//         vulkan_context_init(vk, VULKAN_WSI_WIN32);
-// #else
-//         vulkan_context_init(vk, VULKAN_WSI_XLIB);
-// #endif
-
-        // vk->context.instance = instance;
-        // vk->context.device = device;
-        // // vk->context.queue = graphicsQueue;
-        // vk->context.queue = presentQueue;
-        // vk->context.gpu = physical_devices;
-        // vk->swapchain = swapchain;
-
-        
-        // vulkan_load_instance_symbols(vk);
-       
 
         return true;
     }
@@ -1465,12 +1050,13 @@ int main(int argc, char *argv[]) {
     // g_video.hw.version_minor = 0;
 
     create_window(640, 480);
+    
 
-// #ifdef _WIN32
-//     vulkan_context_init(vk, VULKAN_WSI_WIN32);
-// #else
-//     vulkan_context_init(vk, VULKAN_WSI_XLIB);
-// #endif
+#ifdef _WIN32
+    vulkan_context_init(g_vk, VULKAN_WSI_WIN32);
+#else
+    vulkan_context_init(g_vk, VULKAN_WSI_XLIB);
+#endif
 
 
 
@@ -1508,6 +1094,8 @@ int main(int argc, char *argv[]) {
 #ifdef _WIN32
         __try {
 #endif
+            printf("current_frame_index %d\n", g_vk->context.current_frame_index);
+            printf("retro_run ----> vkGetInstanceProcAddr: %p\n", (void*)vulkan_symbol_wrapper_instance_proc_addr());
             g_retro.retro_run();
             printf("[FRAME %d] retro_run completed\n", frame_count);
 #ifdef _WIN32

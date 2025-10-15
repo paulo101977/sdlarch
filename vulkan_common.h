@@ -794,6 +794,7 @@ RETRO_END_DECLS
 #ifdef __cplusplus
 extern "C" {
 #endif
+static void*                       g_vulkan_library;
 static VkInstance   cached_instance_vk;
 extern struct retro_hw_render_context_negotiation_interface_vulkan *g_iface;
 bool vulkan_load_instance_symbols(gfx_ctx_vulkan_data_t *vk);

@@ -18,7 +18,7 @@
 
 #define VULKAN_COLORSPACE_EXTENSION_NAME "VK_EXT_swapchain_colorspace"
 
-static void*                       vulkan_library;
+static void*                       g_vulkan_library;
 struct retro_hw_render_context_negotiation_interface_vulkan *g_iface = NULL;
 
 enum gfx_ctx_api
@@ -1235,18 +1235,18 @@ bool vulkan_context_init(gfx_ctx_vulkan_data_t *vk,
 
    vk->wsi_type = type;
 
-   if (!vulkan_library)
+   if (!g_vulkan_library)
    {
 #ifdef _WIN32
-      vulkan_library = SDL_LoadObject("vulkan-1.dll");
+      g_vulkan_library = SDL_LoadObject("vulkan-1.dll");
 #else
-      vulkan_library = SDL_LoadObject("libvulkan.so.1");
-      if (!vulkan_library)
-         vulkan_library = SDL_LoadObject("libvulkan.so");
+      g_vulkan_library = SDL_LoadObject("libvulkan.so.1");
+      if (!g_vulkan_library)
+         g_vulkan_library = SDL_LoadObject("libvulkan.so");
 #endif
    }
 
-   if (!vulkan_library)
+   if (!g_vulkan_library)
    {
       printf("[Vulkan] Failed to open Vulkan loader.\n");
       return false;
@@ -1255,7 +1255,7 @@ bool vulkan_context_init(gfx_ctx_vulkan_data_t *vk,
    printf("[Vulkan] Vulkan dynamic library loaded.\n");
 
    GetInstanceProcAddr =
-      (PFN_vkGetInstanceProcAddr)SDL_LoadFunction(vulkan_library, "vkGetInstanceProcAddr");
+      (PFN_vkGetInstanceProcAddr)SDL_LoadFunction(g_vulkan_library, "vkGetInstanceProcAddr");
 
    printf("[Vulkan] Vulkan dynamic library loaded vkGetInstanceProcAddr.\n");
 
@@ -2036,6 +2036,234 @@ static void vulkan_init_hw_render(gfx_ctx_vulkan_data_t *vk, struct retro_hw_ren
 
    (*iface)->get_device_proc_addr   = vkGetDeviceProcAddr;
    (*iface)->get_instance_proc_addr = vulkan_symbol_wrapper_instance_proc_addr();
+}
+
+// TODO implement the init and mabe work!!!!!!
+static void *vulkan_init(const video_info_t *video,
+      input_driver_t **input,
+      void **input_data)
+{
+   unsigned full_x, full_y;
+   unsigned win_width;
+   unsigned win_height;
+   unsigned mode_width                = 0;
+   unsigned mode_height               = 0;
+   int interval                       = 0;
+   unsigned temp_width                = 0;
+   unsigned temp_height               = 0;
+   bool force_fullscreen              = false;
+   const gfx_ctx_driver_t *ctx_driver = NULL;
+   settings_t *settings               = config_get_ptr();
+
+   vk_t *vk                           = (vk_t*)calloc(1, sizeof(*vk));
+   if (!vk)
+      return NULL;
+   ctx_driver                         = vulkan_get_context(vk, settings);
+   if (!ctx_driver)
+   {
+      printf("[Vulkan] Failed to get Vulkan context.\n");
+      goto error;
+   }
+
+   vk->video                          = *video;
+   vk->ctx_driver                     = ctx_driver;
+
+   video_context_driver_set((const gfx_ctx_driver_t*)ctx_driver);
+
+   RARCH_DBG("[Vulkan] Found vulkan context: \"%s\".\n", ctx_driver->ident);
+
+   if (vk->ctx_driver->get_video_size)
+      vk->ctx_driver->get_video_size(vk->ctx_data,
+            &mode_width, &mode_height);
+
+   if (!video->fullscreen && !vk->ctx_driver->has_windowed)
+   {
+      RARCH_DBG("[Vulkan] Config requires windowed mode, but context driver does not support it. "
+                "Forcing fullscreen for this session.\n");
+      force_fullscreen = true;
+   }
+
+   full_x                             = mode_width;
+   full_y                             = mode_height;
+   mode_width                         = 0;
+   mode_height                        = 0;
+
+   RARCH_DBG("[Vulkan] Detecting screen resolution: %ux%u.\n", full_x, full_y);
+   interval = video->vsync ? video->swap_interval : 0;
+
+   if (ctx_driver->swap_interval)
+   {
+      bool adaptive_vsync_enabled            = video_driver_test_all_flags(
+            GFX_CTX_FLAGS_ADAPTIVE_VSYNC) && video->adaptive_vsync;
+      if (adaptive_vsync_enabled && interval == 1)
+         interval = -1;
+      ctx_driver->swap_interval(vk->ctx_data, interval);
+   }
+
+   win_width  = video->width;
+   win_height = video->height;
+
+   if (video->fullscreen && (win_width == 0) && (win_height == 0))
+   {
+      win_width  = full_x;
+      win_height = full_y;
+   }
+   /* If fullscreen had to be forced, video->width/height is incorrect */
+   else if (force_fullscreen)
+   {
+      win_width  = settings->uints.video_fullscreen_x;
+      win_height = settings->uints.video_fullscreen_y;
+   }
+
+   if (     !vk->ctx_driver->set_video_mode
+         || !vk->ctx_driver->set_video_mode(vk->ctx_data,
+            win_width, win_height, (video->fullscreen || force_fullscreen)))
+   {
+      RARCH_ERR("[Vulkan] Failed to set video mode.\n");
+      goto error;
+   }
+
+   if (vk->ctx_driver->get_video_size)
+      vk->ctx_driver->get_video_size(vk->ctx_data,
+            &mode_width, &mode_height);
+
+   temp_width  = mode_width;
+   temp_height = mode_height;
+
+   if (temp_width != 0 && temp_height != 0)
+      video_driver_set_size(temp_width, temp_height);
+   video_driver_get_size(&temp_width, &temp_height);
+   vk->video_width       = temp_width;
+   vk->video_height      = temp_height;
+   vk->translate_x       = 0.0;
+   vk->translate_y       = 0.0;
+
+   RARCH_LOG("[Vulkan] Using resolution %ux%u.\n", temp_width, temp_height);
+
+   if (!vk->ctx_driver || !vk->ctx_driver->get_context_data)
+   {
+      RARCH_ERR("[Vulkan] Failed to get context data.\n");
+      goto error;
+   }
+
+   *(void**)&vk->context = vk->ctx_driver->get_context_data(vk->ctx_data);
+
+   if (video->vsync)
+      vk->flags         |=  VK_FLAG_VSYNC;
+   else
+      vk->flags         &= ~VK_FLAG_VSYNC;
+   if (video->fullscreen || force_fullscreen)
+      vk->flags         |=  VK_FLAG_FULLSCREEN;
+   else
+      vk->flags         &= ~VK_FLAG_FULLSCREEN;
+   vk->tex_w             = RARCH_SCALE_BASE * video->input_scale;
+   vk->tex_h             = RARCH_SCALE_BASE * video->input_scale;
+   vk->tex_fmt           = video->rgb32 ? VK_FORMAT_B8G8R8A8_UNORM : VK_FORMAT_R5G6B5_UNORM_PACK16;
+   if (video->force_aspect)
+      vk->flags         |=  VK_FLAG_KEEP_ASPECT;
+   else
+      vk->flags         &= ~VK_FLAG_KEEP_ASPECT;
+   printf("[Vulkan] Using %s format.\n", video->rgb32 ? "BGRA8888" : "RGB565");
+
+   /* Set the viewport to fix recording, since it needs to know
+    * the viewport sizes before we start running. */
+   vulkan_set_viewport(vk, temp_width, temp_height, false, true);
+
+   vulkan_init_hw_render(vk);
+   if (vk->context)
+   {
+      int i;
+      static const VkDescriptorPoolSize pool_sizes[4] = {
+         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         VULKAN_DESCRIPTOR_MANAGER_BLOCK_SETS },
+         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VULKAN_DESCRIPTOR_MANAGER_BLOCK_SETS * 2 },
+         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          VULKAN_DESCRIPTOR_MANAGER_BLOCK_SETS },
+         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         VULKAN_DESCRIPTOR_MANAGER_BLOCK_SETS },
+      };
+
+      vulkan_init_static_resources(vk);
+
+      vk->num_swapchain_images = vk->context->num_swapchain_images;
+
+      vulkan_init_render_pass(vk);
+      vulkan_init_framebuffers(vk);
+      vulkan_init_pipelines(vk);
+      vulkan_init_samplers(vk);
+      vulkan_init_textures(vk);
+
+      for (i = 0; i < (int) vk->num_swapchain_images; i++)
+      {
+         VkCommandPoolCreateInfo pool_info;
+         VkCommandBufferAllocateInfo info;
+
+         vk->swapchain[i].descriptor_manager =
+            vulkan_create_descriptor_manager(
+                  vk->context->device,
+                  pool_sizes, 4, vk->pipelines.set_layout);
+         vk->swapchain[i].vbo                =
+            vulkan_buffer_chain_init(
+               VULKAN_BUFFER_BLOCK_SIZE, 16,
+               VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+         vk->swapchain[i].ubo                =
+            vulkan_buffer_chain_init(
+               VULKAN_BUFFER_BLOCK_SIZE,
+               vk->context->gpu_properties.limits.minUniformBufferOffsetAlignment,
+               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+
+         pool_info.sType            =
+            VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+         pool_info.pNext            = NULL;
+         /* RESET_COMMAND_BUFFER_BIT allows command buffer to be reset. */
+         pool_info.flags            =
+            VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+         pool_info.queueFamilyIndex = vk->context->graphics_queue_index;
+
+         vkCreateCommandPool(vk->context->device,
+               &pool_info, NULL, &vk->swapchain[i].cmd_pool);
+
+         info.sType                 =
+            VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+         info.pNext                 = NULL;
+         info.commandPool           = vk->swapchain[i].cmd_pool;
+         info.level                 = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+         info.commandBufferCount    = 1;
+
+         vkAllocateCommandBuffers(vk->context->device,
+               &info, &vk->swapchain[i].cmd);
+      }
+   }
+
+   if (!vulkan_init_filter_chain(vk))
+   {
+      RARCH_ERR("[Vulkan] Failed to init filter chain.\n");
+      goto error;
+   }
+
+   if (vk->ctx_driver->input_driver)
+   {
+      const char *joypad_name = settings->arrays.input_joypad_driver;
+      vk->ctx_driver->input_driver(
+            vk->ctx_data, joypad_name,
+            input, input_data);
+   }
+
+   if (video->font_enable)
+      font_driver_init_osd(vk,
+            video,
+            false,
+            video->is_threaded,
+            FONT_DRIVER_RENDER_VULKAN_API);
+
+   /* The MoltenVK driver needs this, particularly after driver reinit
+      Also it is required for HDR to not break during reinit, while not ideal it
+      is the simplest solution unless reinit tracking is done */
+   vk->flags |= VK_FLAG_SHOULD_RESIZE;
+
+   vulkan_init_readback(vk, settings->bools.video_gpu_record);
+   return vk;
+
+   error:
+      vulkan_free(vk);
+      return NULL;
 }
 
 
