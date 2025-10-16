@@ -38,6 +38,8 @@ static bool g_context_reset = false;
 
 // static struct retro_hw_render_interface_vulkan _g_render_iface = {};
 static struct retro_hw_render_interface_vulkan g_render_iface = {};
+static gfx_ctx_vulkan_data_t _gfx = {};
+static gfx_ctx_vulkan_data_t *g_gfx = &_gfx;
 
 VkSurfaceKHR surface;
 VkFormat depthFormat;//

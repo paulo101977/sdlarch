@@ -796,8 +796,6 @@ extern "C" {
 #endif
 static void*                       g_vulkan_library;
 static VkInstance   cached_instance_vk;
-static gfx_ctx_vulkan_data_t _gfx;
-static gfx_ctx_vulkan_data_t *g_gfx;
 extern struct retro_hw_render_context_negotiation_interface_vulkan *g_iface;
 bool vulkan_load_instance_symbols(gfx_ctx_vulkan_data_t *vk);
 bool vulkan_load_device_symbols(gfx_ctx_vulkan_data_t *vk);

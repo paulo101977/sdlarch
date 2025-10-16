@@ -19,8 +19,6 @@
 #define VULKAN_COLORSPACE_EXTENSION_NAME "VK_EXT_swapchain_colorspace"
 
 static void*                       g_vulkan_library;
-static gfx_ctx_vulkan_data_t _gfx = {};
-static gfx_ctx_vulkan_data_t *g_gfx = &_gfx;
 
 struct retro_hw_render_context_negotiation_interface_vulkan *g_iface = NULL;
 
@@ -1221,6 +1219,8 @@ end:
 bool vulkan_context_init(gfx_ctx_vulkan_data_t *vk,
       enum vulkan_wsi_type type)
 {
+   printf("LINE %d\n", __LINE__);
+   printf("[Vulkan] Initializing Vulkan context... vk: %p\n", vk);
    VkApplicationInfo app;
    PFN_vkGetInstanceProcAddr GetInstanceProcAddr;
    const char *prog_name          = NULL;
