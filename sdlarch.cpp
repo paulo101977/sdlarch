@@ -39,9 +39,6 @@ static bool g_context_reset = false;
 // static struct retro_hw_render_interface_vulkan _g_render_iface = {};
 static struct retro_hw_render_interface_vulkan g_render_iface = {};
 
-static gfx_ctx_vulkan_data_t _vk = {};
-static gfx_ctx_vulkan_data_t *g_vk = &_vk;
-
 VkSurfaceKHR surface;
 VkFormat depthFormat;//
 VkImage depthImage;//
@@ -462,7 +459,7 @@ static int key_exists(const char* key) {
 static uint32_t vulkan_get_sync_index_mask(void *handle)
 {
    printf("[VULKAN] vulkan_get_sync_index_mask called  ---------------->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> \n");
-   return (1 << g_vk ->context.num_swapchain_images) - 1;
+   return (1 << g_gfx ->context.num_swapchain_images) - 1;
 }
 
 void vulkan_context_reset() {
@@ -488,7 +485,7 @@ static void vulkan_wait_sync_index(void *handle) {
 static uint32_t vulkan_get_sync_index(void *handle)
 {
     printf("[VULKAN] vulkan_get_sync_index called  ---------------->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> \n");
-    return g_vk->context.current_frame_index;
+    return g_gfx->context.current_frame_index;
 }
 
 // TODO implement and mabe work!!!!!!!!!!!!
@@ -761,19 +758,19 @@ static bool core_environment(unsigned cmd, void *data) {
         // What to do here?
         g_iface = iface;
 #ifdef _WIN32
-        vulkan_context_init(g_vk, VULKAN_WSI_WIN32);
+        vulkan_context_init(g_gfx, VULKAN_WSI_WIN32);
 #else
-        vulkan_context_init(g_vk, VULKAN_WSI_XLIB);
+        vulkan_context_init(g_gfx, VULKAN_WSI_XLIB);
 #endif
-        SDL_Vulkan_CreateSurface(g_win, g_vk->context.instance, &surface);
-        g_vk->vk_surface = surface;
-        vulkan_context_init_device(g_vk);
-        vulkan_create_swapchain(g_vk, 640, 480, 1);
+        SDL_Vulkan_CreateSurface(g_win, g_gfx->context.instance, &surface);
+        g_gfx->vk_surface = surface;
+        vulkan_context_init_device(g_gfx);
+        vulkan_create_swapchain(g_gfx, 640, 480, 1);
         vk_t _vk = {};
-        _vk.context = &g_vk->context;
-        _vk.num_swapchain_images = g_vk->context.num_swapchain_images;
+        _vk.context = &g_gfx->context;
+        _vk.num_swapchain_images = g_gfx->context.num_swapchain_images;
         _vk.hw = {};
-        // _vk.swapchain = g_vk->context.swapchain;
+        // _vk.swapchain = g_gfx->context.swapchain;
         // vulkan_init_textures(&_vk);
 
         PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = vulkan_symbol_wrapper_instance_proc_addr();
@@ -782,14 +779,14 @@ static bool core_environment(unsigned cmd, void *data) {
 
         g_render_iface.interface_type         = RETRO_HW_RENDER_INTERFACE_VULKAN;
         g_render_iface.interface_version      = RETRO_HW_RENDER_INTERFACE_VULKAN_VERSION;
-        g_render_iface.instance               = g_vk->context.instance; // vk->context->instance;
-        g_render_iface.gpu                    = g_vk->context.gpu;
-        g_render_iface.device                 = g_vk->context.device;
+        g_render_iface.instance               = g_gfx->context.instance; // vk->context->instance;
+        g_render_iface.gpu                    = g_gfx->context.gpu;
+        g_render_iface.device                 = g_gfx->context.device;
 
-        g_render_iface.queue                  = g_vk->context.queue;
-        g_render_iface.queue_index            = g_vk->context.graphics_queue_index;
+        g_render_iface.queue                  = g_gfx->context.queue;
+        g_render_iface.queue_index            = g_gfx->context.graphics_queue_index;
 
-        g_render_iface.handle                 = g_vk;
+        g_render_iface.handle                 = g_gfx;
         g_render_iface.get_sync_index_mask = vulkan_get_sync_index_mask;
         g_render_iface.lock_queue             = vulkan_lock_queue;
         g_render_iface.unlock_queue           = vulkan_unlock_queue;
@@ -1053,9 +1050,9 @@ int main(int argc, char *argv[]) {
     
 
 #ifdef _WIN32
-    vulkan_context_init(g_vk, VULKAN_WSI_WIN32);
+    vulkan_context_init(g_gfx, VULKAN_WSI_WIN32);
 #else
-    vulkan_context_init(g_vk, VULKAN_WSI_XLIB);
+    vulkan_context_init(g_gfx, VULKAN_WSI_XLIB);
 #endif
 
 
@@ -1094,7 +1091,7 @@ int main(int argc, char *argv[]) {
 #ifdef _WIN32
         __try {
 #endif
-            printf("current_frame_index %d\n", g_vk->context.current_frame_index);
+            printf("current_frame_index %d\n", g_gfx->context.current_frame_index);
             printf("retro_run ----> vkGetInstanceProcAddr: %p\n", (void*)vulkan_symbol_wrapper_instance_proc_addr());
             g_retro.retro_run();
             printf("[FRAME %d] retro_run completed\n", frame_count);

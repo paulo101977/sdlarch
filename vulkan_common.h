@@ -796,6 +796,8 @@ extern "C" {
 #endif
 static void*                       g_vulkan_library;
 static VkInstance   cached_instance_vk;
+static gfx_ctx_vulkan_data_t _gfx;
+static gfx_ctx_vulkan_data_t *g_gfx;
 extern struct retro_hw_render_context_negotiation_interface_vulkan *g_iface;
 bool vulkan_load_instance_symbols(gfx_ctx_vulkan_data_t *vk);
 bool vulkan_load_device_symbols(gfx_ctx_vulkan_data_t *vk);
@@ -803,7 +805,7 @@ bool vulkan_context_init_device(gfx_ctx_vulkan_data_t *vk);
 bool vulkan_create_swapchain(gfx_ctx_vulkan_data_t *vk,unsigned width, unsigned height,int8_t swap_interval);
 void vulkan_acquire_next_image(gfx_ctx_vulkan_data_t *vk);
 bool vulkan_context_init(gfx_ctx_vulkan_data_t *vk, enum vulkan_wsi_type type);
-void vulkan_init_hw_render(gfx_ctx_vulkan_data_t *vk, struct retro_hw_render_callback *hwr, struct retro_hw_render_interface_vulkan **iface);
+void vulkan_init_hw_render(vk_t *vk);
 struct vk_texture vulkan_create_texture(vk_t *vk,
       struct vk_texture *old,
       unsigned width, unsigned height,

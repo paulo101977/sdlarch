@@ -19,7 +19,11 @@
 #define VULKAN_COLORSPACE_EXTENSION_NAME "VK_EXT_swapchain_colorspace"
 
 static void*                       g_vulkan_library;
+static gfx_ctx_vulkan_data_t _gfx = {};
+static gfx_ctx_vulkan_data_t *g_gfx = &_gfx;
+
 struct retro_hw_render_context_negotiation_interface_vulkan *g_iface = NULL;
+
 
 enum gfx_ctx_api
 {
@@ -2008,263 +2012,287 @@ static struct vk_texture vulkan_create_texture(vk_t *vk,
 //    }
 // }
 
-static void vulkan_init_hw_render(gfx_ctx_vulkan_data_t *vk, struct retro_hw_render_callback *hwr, struct retro_hw_render_interface_vulkan **iface)
+static uint32_t vulkan_get_sync_index(void *handle)
 {
-   if (hwr->context_type != RETRO_HW_CONTEXT_VULKAN)
-      return;
-
-   vk->flags                    |= VK_FLAG_HW_ENABLE;
-
-   (*iface)->interface_type         = RETRO_HW_RENDER_INTERFACE_VULKAN;
-   (*iface)->interface_version      = RETRO_HW_RENDER_INTERFACE_VULKAN_VERSION;
-   (*iface)->instance               = vk->context.instance; // vk->context->instance;
-   (*iface)->gpu                    = vk->context.gpu;
-   (*iface)->device                 = vk->context.device;
-
-   (*iface)->queue                  = vk->context.queue;
-   (*iface)->queue_index            = vk->context.graphics_queue_index;
-
-   (*iface)->handle                 = vk;
-   // iface->set_image              = vulkan_set_image;
-   // iface->get_sync_index         = vulkan_get_sync_index;
-   // iface->get_sync_index_mask    = vulkan_get_sync_index_mask;
-   // iface->wait_sync_index        = vulkan_wait_sync_index;
-   // iface->set_command_buffers    = vulkan_set_command_buffers;
-   // iface->lock_queue             = vulkan_lock_queue;
-   // iface->unlock_queue           = vulkan_unlock_queue;
-   // iface->set_signal_semaphore   = vulkan_set_signal_semaphore;
-
-   (*iface)->get_device_proc_addr   = vkGetDeviceProcAddr;
-   (*iface)->get_instance_proc_addr = vulkan_symbol_wrapper_instance_proc_addr();
+   vk_t *vk = (vk_t*)handle;
+   return vk->context->current_frame_index;
 }
 
-// TODO implement the init and mabe work!!!!!!
-static void *vulkan_init(const video_info_t *video,
-      input_driver_t **input,
-      void **input_data)
+static uint32_t vulkan_get_sync_index_mask(void *handle)
 {
-   unsigned full_x, full_y;
-   unsigned win_width;
-   unsigned win_height;
-   unsigned mode_width                = 0;
-   unsigned mode_height               = 0;
-   int interval                       = 0;
-   unsigned temp_width                = 0;
-   unsigned temp_height               = 0;
-   bool force_fullscreen              = false;
-   const gfx_ctx_driver_t *ctx_driver = NULL;
-   settings_t *settings               = config_get_ptr();
+   vk_t *vk = (vk_t*)handle;
+   return (1 << vk->context->num_swapchain_images) - 1;
+}
 
-   vk_t *vk                           = (vk_t*)calloc(1, sizeof(*vk));
-   if (!vk)
-      return NULL;
-   ctx_driver                         = vulkan_get_context(vk, settings);
-   if (!ctx_driver)
-   {
-      printf("[Vulkan] Failed to get Vulkan context.\n");
-      goto error;
-   }
+static void vulkan_set_image(void *handle,
+      const struct retro_vulkan_image *image,
+      uint32_t num_semaphores,
+      const VkSemaphore *semaphores,
+      uint32_t src_queue_family)
+{
+   vk_t *vk              = (vk_t*)handle;
 
-   vk->video                          = *video;
-   vk->ctx_driver                     = ctx_driver;
+   vk->hw.image          = image;
+   vk->hw.num_semaphores = num_semaphores;
 
-   video_context_driver_set((const gfx_ctx_driver_t*)ctx_driver);
-
-   RARCH_DBG("[Vulkan] Found vulkan context: \"%s\".\n", ctx_driver->ident);
-
-   if (vk->ctx_driver->get_video_size)
-      vk->ctx_driver->get_video_size(vk->ctx_data,
-            &mode_width, &mode_height);
-
-   if (!video->fullscreen && !vk->ctx_driver->has_windowed)
-   {
-      RARCH_DBG("[Vulkan] Config requires windowed mode, but context driver does not support it. "
-                "Forcing fullscreen for this session.\n");
-      force_fullscreen = true;
-   }
-
-   full_x                             = mode_width;
-   full_y                             = mode_height;
-   mode_width                         = 0;
-   mode_height                        = 0;
-
-   RARCH_DBG("[Vulkan] Detecting screen resolution: %ux%u.\n", full_x, full_y);
-   interval = video->vsync ? video->swap_interval : 0;
-
-   if (ctx_driver->swap_interval)
-   {
-      bool adaptive_vsync_enabled            = video_driver_test_all_flags(
-            GFX_CTX_FLAGS_ADAPTIVE_VSYNC) && video->adaptive_vsync;
-      if (adaptive_vsync_enabled && interval == 1)
-         interval = -1;
-      ctx_driver->swap_interval(vk->ctx_data, interval);
-   }
-
-   win_width  = video->width;
-   win_height = video->height;
-
-   if (video->fullscreen && (win_width == 0) && (win_height == 0))
-   {
-      win_width  = full_x;
-      win_height = full_y;
-   }
-   /* If fullscreen had to be forced, video->width/height is incorrect */
-   else if (force_fullscreen)
-   {
-      win_width  = settings->uints.video_fullscreen_x;
-      win_height = settings->uints.video_fullscreen_y;
-   }
-
-   if (     !vk->ctx_driver->set_video_mode
-         || !vk->ctx_driver->set_video_mode(vk->ctx_data,
-            win_width, win_height, (video->fullscreen || force_fullscreen)))
-   {
-      RARCH_ERR("[Vulkan] Failed to set video mode.\n");
-      goto error;
-   }
-
-   if (vk->ctx_driver->get_video_size)
-      vk->ctx_driver->get_video_size(vk->ctx_data,
-            &mode_width, &mode_height);
-
-   temp_width  = mode_width;
-   temp_height = mode_height;
-
-   if (temp_width != 0 && temp_height != 0)
-      video_driver_set_size(temp_width, temp_height);
-   video_driver_get_size(&temp_width, &temp_height);
-   vk->video_width       = temp_width;
-   vk->video_height      = temp_height;
-   vk->translate_x       = 0.0;
-   vk->translate_y       = 0.0;
-
-   RARCH_LOG("[Vulkan] Using resolution %ux%u.\n", temp_width, temp_height);
-
-   if (!vk->ctx_driver || !vk->ctx_driver->get_context_data)
-   {
-      RARCH_ERR("[Vulkan] Failed to get context data.\n");
-      goto error;
-   }
-
-   *(void**)&vk->context = vk->ctx_driver->get_context_data(vk->ctx_data);
-
-   if (video->vsync)
-      vk->flags         |=  VK_FLAG_VSYNC;
-   else
-      vk->flags         &= ~VK_FLAG_VSYNC;
-   if (video->fullscreen || force_fullscreen)
-      vk->flags         |=  VK_FLAG_FULLSCREEN;
-   else
-      vk->flags         &= ~VK_FLAG_FULLSCREEN;
-   vk->tex_w             = RARCH_SCALE_BASE * video->input_scale;
-   vk->tex_h             = RARCH_SCALE_BASE * video->input_scale;
-   vk->tex_fmt           = video->rgb32 ? VK_FORMAT_B8G8R8A8_UNORM : VK_FORMAT_R5G6B5_UNORM_PACK16;
-   if (video->force_aspect)
-      vk->flags         |=  VK_FLAG_KEEP_ASPECT;
-   else
-      vk->flags         &= ~VK_FLAG_KEEP_ASPECT;
-   printf("[Vulkan] Using %s format.\n", video->rgb32 ? "BGRA8888" : "RGB565");
-
-   /* Set the viewport to fix recording, since it needs to know
-    * the viewport sizes before we start running. */
-   vulkan_set_viewport(vk, temp_width, temp_height, false, true);
-
-   vulkan_init_hw_render(vk);
-   if (vk->context)
+   if (num_semaphores > 0)
    {
       int i;
-      static const VkDescriptorPoolSize pool_sizes[4] = {
-         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         VULKAN_DESCRIPTOR_MANAGER_BLOCK_SETS },
-         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VULKAN_DESCRIPTOR_MANAGER_BLOCK_SETS * 2 },
-         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          VULKAN_DESCRIPTOR_MANAGER_BLOCK_SETS },
-         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         VULKAN_DESCRIPTOR_MANAGER_BLOCK_SETS },
-      };
 
-      vulkan_init_static_resources(vk);
+      /* Allocate one extra in case we need to use WSI acquire semaphores. */
+      VkPipelineStageFlags *stage_flags = (VkPipelineStageFlags*)realloc(vk->hw.wait_dst_stages,
+            sizeof(VkPipelineStageFlags) * (vk->hw.num_semaphores + 1));
 
-      vk->num_swapchain_images = vk->context->num_swapchain_images;
+      VkSemaphore *new_semaphores = (VkSemaphore*)realloc(vk->hw.semaphores,
+            sizeof(VkSemaphore) * (vk->hw.num_semaphores + 1));
 
-      vulkan_init_render_pass(vk);
-      vulkan_init_framebuffers(vk);
-      vulkan_init_pipelines(vk);
-      vulkan_init_samplers(vk);
-      vulkan_init_textures(vk);
+      vk->hw.wait_dst_stages = stage_flags;
+      vk->hw.semaphores      = new_semaphores;
 
-      for (i = 0; i < (int) vk->num_swapchain_images; i++)
+      for (i = 0; i < (int) vk->hw.num_semaphores; i++)
       {
-         VkCommandPoolCreateInfo pool_info;
-         VkCommandBufferAllocateInfo info;
-
-         vk->swapchain[i].descriptor_manager =
-            vulkan_create_descriptor_manager(
-                  vk->context->device,
-                  pool_sizes, 4, vk->pipelines.set_layout);
-         vk->swapchain[i].vbo                =
-            vulkan_buffer_chain_init(
-               VULKAN_BUFFER_BLOCK_SIZE, 16,
-               VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-         vk->swapchain[i].ubo                =
-            vulkan_buffer_chain_init(
-               VULKAN_BUFFER_BLOCK_SIZE,
-               vk->context->gpu_properties.limits.minUniformBufferOffsetAlignment,
-               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-
-         pool_info.sType            =
-            VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-         pool_info.pNext            = NULL;
-         /* RESET_COMMAND_BUFFER_BIT allows command buffer to be reset. */
-         pool_info.flags            =
-            VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-         pool_info.queueFamilyIndex = vk->context->graphics_queue_index;
-
-         vkCreateCommandPool(vk->context->device,
-               &pool_info, NULL, &vk->swapchain[i].cmd_pool);
-
-         info.sType                 =
-            VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-         info.pNext                 = NULL;
-         info.commandPool           = vk->swapchain[i].cmd_pool;
-         info.level                 = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-         info.commandBufferCount    = 1;
-
-         vkAllocateCommandBuffers(vk->context->device,
-               &info, &vk->swapchain[i].cmd);
+         vk->hw.wait_dst_stages[i] = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+         vk->hw.semaphores[i]      = semaphores[i];
       }
+
+      vk->flags                   |= VK_FLAG_HW_VALID_SEMAPHORE;
+      vk->hw.src_queue_family      = src_queue_family;
    }
-
-   if (!vulkan_init_filter_chain(vk))
-   {
-      RARCH_ERR("[Vulkan] Failed to init filter chain.\n");
-      goto error;
-   }
-
-   if (vk->ctx_driver->input_driver)
-   {
-      const char *joypad_name = settings->arrays.input_joypad_driver;
-      vk->ctx_driver->input_driver(
-            vk->ctx_data, joypad_name,
-            input, input_data);
-   }
-
-   if (video->font_enable)
-      font_driver_init_osd(vk,
-            video,
-            false,
-            video->is_threaded,
-            FONT_DRIVER_RENDER_VULKAN_API);
-
-   /* The MoltenVK driver needs this, particularly after driver reinit
-      Also it is required for HDR to not break during reinit, while not ideal it
-      is the simplest solution unless reinit tracking is done */
-   vk->flags |= VK_FLAG_SHOULD_RESIZE;
-
-   vulkan_init_readback(vk, settings->bools.video_gpu_record);
-   return vk;
-
-   error:
-      vulkan_free(vk);
-      return NULL;
 }
+
+static void vulkan_wait_sync_index(void *handle)
+{
+   /* no-op. RetroArch already waits for this
+    * in gfx_ctx_swap_buffers(). */
+}
+
+static void vulkan_set_command_buffers(void *handle, uint32_t num_cmd,
+      const VkCommandBuffer *cmd)
+{
+   vk_t *vk                   = (vk_t*)handle;
+   unsigned required_capacity = num_cmd + 1;
+   if (required_capacity > vk->hw.capacity_cmd)
+   {
+      VkCommandBuffer *hw_cmd = (VkCommandBuffer*)
+         realloc(vk->hw.cmd,
+            sizeof(VkCommandBuffer) * required_capacity);
+
+      vk->hw.cmd              = hw_cmd;
+      vk->hw.capacity_cmd     = required_capacity;
+   }
+
+   vk->hw.num_cmd             = num_cmd;
+   memcpy(vk->hw.cmd, cmd, sizeof(VkCommandBuffer) * num_cmd);
+}
+
+static void vulkan_lock_queue(void *handle)
+{
+#ifdef HAVE_THREADS
+   vk_t *vk = (vk_t*)handle;
+   slock_lock(vk->context->queue_lock);
+#endif
+}
+
+static void vulkan_unlock_queue(void *handle)
+{
+#ifdef HAVE_THREADS
+   vk_t *vk = (vk_t*)handle;
+   slock_unlock(vk->context->queue_lock);
+#endif
+}
+
+static void vulkan_set_signal_semaphore(void *handle, VkSemaphore semaphore)
+{
+   vk_t *vk = (vk_t*)handle;
+   vk->hw.signal_semaphore = semaphore;
+}
+
+// static void vulkan_init_hw_render(vk_t *vk)
+// {
+//    struct retro_hw_render_interface_vulkan *iface   =
+//       &vk->hw.iface;
+
+//    vk->flags                    |= VK_FLAG_HW_ENABLE;
+
+//    iface->interface_type         = RETRO_HW_RENDER_INTERFACE_VULKAN;
+//    iface->interface_version      = RETRO_HW_RENDER_INTERFACE_VULKAN_VERSION;
+//    iface->instance               = vk->context->instance;
+//    iface->gpu                    = vk->context->gpu;
+//    iface->device                 = vk->context->device;
+
+//    iface->queue                  = vk->context->queue;
+//    iface->queue_index            = vk->context->graphics_queue_index;
+
+//    iface->handle                 = vk;
+//    iface->set_image              = vulkan_set_image;
+//    iface->get_sync_index         = vulkan_get_sync_index;
+//    iface->get_sync_index_mask    = vulkan_get_sync_index_mask;
+//    iface->wait_sync_index        = vulkan_wait_sync_index;
+//    iface->set_command_buffers    = vulkan_set_command_buffers;
+//    iface->lock_queue             = vulkan_lock_queue;
+//    iface->unlock_queue           = vulkan_unlock_queue;
+//    iface->set_signal_semaphore   = vulkan_set_signal_semaphore;
+
+//    iface->get_device_proc_addr   = vkGetDeviceProcAddr;
+//    iface->get_instance_proc_addr = vulkan_symbol_wrapper_instance_proc_addr();
+// }
+
+// // TODO implement the init and mabe work!!!!!!
+// static void *vulkan_init(
+//    const video_info_t *video,
+//    input_driver_t **input,
+//    void **input_data,
+//    int width, 
+//    int height
+//    )
+// {
+//    unsigned full_x, full_y;
+//    unsigned win_width;
+//    unsigned win_height;
+//    unsigned mode_width                = 0;
+//    unsigned mode_height               = 0;
+//    int interval                       = 0;
+//    unsigned temp_width                = 0;
+//    unsigned temp_height               = 0;
+//    bool force_fullscreen              = false;
+//    settings_t *settings               = config_get_ptr();
+
+//    vk_t *vk                           = (vk_t*)calloc(1, sizeof(*vk));
+//    if (!vk)
+//       return NULL;
+
+
+//    // vk->video                          = *video;
+//    // vk->ctx_driver                     = ctx_driver;
+
+
+//    full_x                             = mode_width;
+//    full_y                             = mode_height;
+//    mode_width                         = 0;
+//    mode_height                        = 0;
+
+//    printf("[Vulkan] Detecting screen resolution: %ux%u.\n", full_x, full_y);
+//    interval = 0;
+
+//    win_width  = width;
+//    win_height = height;
+//    temp_width  = width;
+//    temp_height = height;
+
+
+//    vk->video_width       = temp_width;
+//    vk->video_height      = temp_height;
+//    vk->translate_x       = 0.0;
+//    vk->translate_y       = 0.0;
+
+//    printf("[Vulkan] Using resolution %ux%u.\n", temp_width, temp_height);
+
+
+//    *(void**)&vk->context = vk->ctx_driver->get_context_data(vk->ctx_data);
+
+//    if (video->vsync)
+//       vk->flags         |=  VK_FLAG_VSYNC;
+//    else
+//       vk->flags         &= ~VK_FLAG_VSYNC;
+//    if (video->fullscreen || force_fullscreen)
+//       vk->flags         |=  VK_FLAG_FULLSCREEN;
+//    else
+//       vk->flags         &= ~VK_FLAG_FULLSCREEN;
+//    vk->tex_w             = RARCH_SCALE_BASE * video->input_scale;
+//    vk->tex_h             = RARCH_SCALE_BASE * video->input_scale;
+//    vk->tex_fmt           = video->rgb32 ? VK_FORMAT_B8G8R8A8_UNORM : VK_FORMAT_R5G6B5_UNORM_PACK16;
+//    if (video->force_aspect)
+//       vk->flags         |=  VK_FLAG_KEEP_ASPECT;
+//    else
+//       vk->flags         &= ~VK_FLAG_KEEP_ASPECT;
+//    printf("[Vulkan] Using %s format.\n", video->rgb32 ? "BGRA8888" : "RGB565");
+
+//    /* Set the viewport to fix recording, since it needs to know
+//     * the viewport sizes before we start running. */
+//    vulkan_set_viewport(vk, temp_width, temp_height, false, true);
+
+//    vulkan_init_hw_render(vk);
+//    if (vk->context)
+//    {
+//       int i;
+//       static const VkDescriptorPoolSize pool_sizes[4] = {
+//          { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         VULKAN_DESCRIPTOR_MANAGER_BLOCK_SETS },
+//          { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VULKAN_DESCRIPTOR_MANAGER_BLOCK_SETS * 2 },
+//          { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          VULKAN_DESCRIPTOR_MANAGER_BLOCK_SETS },
+//          { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         VULKAN_DESCRIPTOR_MANAGER_BLOCK_SETS },
+//       };
+
+//       vulkan_init_static_resources(vk);
+
+//       vk->num_swapchain_images = vk->context->num_swapchain_images;
+
+//       vulkan_init_render_pass(vk);
+//       vulkan_init_framebuffers(vk);
+//       vulkan_init_pipelines(vk);
+//       vulkan_init_samplers(vk);
+//       vulkan_init_textures(vk);
+
+//       for (i = 0; i < (int) vk->num_swapchain_images; i++)
+//       {
+//          VkCommandPoolCreateInfo pool_info;
+//          VkCommandBufferAllocateInfo info;
+
+//          vk->swapchain[i].descriptor_manager =
+//             vulkan_create_descriptor_manager(
+//                   vk->context->device,
+//                   pool_sizes, 4, vk->pipelines.set_layout);
+//          vk->swapchain[i].vbo                =
+//             vulkan_buffer_chain_init(
+//                VULKAN_BUFFER_BLOCK_SIZE, 16,
+//                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+//          vk->swapchain[i].ubo                =
+//             vulkan_buffer_chain_init(
+//                VULKAN_BUFFER_BLOCK_SIZE,
+//                vk->context->gpu_properties.limits.minUniformBufferOffsetAlignment,
+//                VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+
+//          pool_info.sType            =
+//             VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+//          pool_info.pNext            = NULL;
+//          /* RESET_COMMAND_BUFFER_BIT allows command buffer to be reset. */
+//          pool_info.flags            =
+//             VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+//          pool_info.queueFamilyIndex = vk->context->graphics_queue_index;
+
+//          vkCreateCommandPool(vk->context->device,
+//                &pool_info, NULL, &vk->swapchain[i].cmd_pool);
+
+//          info.sType                 =
+//             VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+//          info.pNext                 = NULL;
+//          info.commandPool           = vk->swapchain[i].cmd_pool;
+//          info.level                 = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+//          info.commandBufferCount    = 1;
+
+//          vkAllocateCommandBuffers(vk->context->device,
+//                &info, &vk->swapchain[i].cmd);
+//       }
+//    }
+
+//    if (!vulkan_init_filter_chain(vk))
+//    {
+//       RARCH_ERR("[Vulkan] Failed to init filter chain.\n");
+//       goto error;
+//    }
+
+
+//    /* The MoltenVK driver needs this, particularly after driver reinit
+//       Also it is required for HDR to not break during reinit, while not ideal it
+//       is the simplest solution unless reinit tracking is done */
+//    vk->flags |= VK_FLAG_SHOULD_RESIZE;
+
+//    vulkan_init_readback(vk, false);
+//    return vk;
+
+//    error:
+//       vulkan_free(vk);
+//       return NULL;
+// }
 
 
 // void vulkan_context_destroy(gfx_ctx_vulkan_data_t *vk,
